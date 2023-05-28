@@ -1,0 +1,6 @@
+[submodule "3rdParty/LitePdfLib"]
+	path = 3rdParty/LitePdfLib
+	url = https://github.com/Targoman/LitePdfLib
+[submodule "3rdParty/TargomanCMake"]
+	path = 3rdParty/TargomanCMake
+	url = https://github.com/targoman/TargomanCMake
