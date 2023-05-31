@@ -168,5 +168,15 @@ bool stuBoundingBox::contains(const BoundingBoxPtr_t &_other) const {
   return this->contains(*_other);
 }
 
+void stuDocLine::mergeWith_(const stuDocLine &_otherLine) {
+  this->BoundingBox.unionWith_(_otherLine.BoundingBox);
+  this->Items.insert(this->Items.end(), _otherLine.Items.begin(),
+                     _otherLine.Items.end());
+}
+
+void stuDocLine::mergeWith_(const DocLinePtr_t &_otherLine) {
+  return this->mergeWith_(*_otherLine);
+}
+
 }  // namespace DLA
 }  // namespace Targoman

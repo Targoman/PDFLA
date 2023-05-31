@@ -1,6 +1,5 @@
 #include "pdfla.h"
 
-#include <algorithm>
 #include <iostream>
 
 #include "algorithm.hpp"
@@ -12,8 +11,9 @@ namespace PDFLA {
 using namespace Targoman::DLA;
 using namespace Targoman::Common;
 
-constexpr float DEBUG_UPSCALE_FACTOR = 2.f;
+constexpr float DEBUG_UPSCALE_FACTOR = 1.3f;
 constexpr float MAX_IMAGE_BLOB_AREA_FACTOR = 0.5f;
+constexpr float MAX_WORD_SEPARATION_TO_MEAN_CHAR_WIDTH_RATIO = 2.f;
 
 class clsPdfLaInternals {
  private:
@@ -21,13 +21,14 @@ class clsPdfLaInternals {
 
  private:
   float computeWordSeparationThreshold(
-      const DocItemPtrVector_t &_sortedDocItems, float _width);
+      const DocItemPtrVector_t &_sortedDocItems, float _meanCharWidth,
+      float _width);
   BoundingBoxPtrVector_t getRawWhitespaceCover(
       const BoundingBoxPtr_t &_bounds, const BoundingBoxPtrVector_t &_obstacles,
       float _minCoverLegSize);
   BoundingBoxPtrVector_t getWhitespaceCoverage(
       const DocItemPtrVector_t &_sortedDocItems, const stuSize &_pageSize,
-      float _wordSeparationThreshold);
+      float _meanCharWidth, float _wordSeparationThreshold);
   std::tuple<DocLinePtrVector_t, DocItemPtrVector_t> findPageLinesAndFigures(
       const DocItemPtrVector_t &_docItems, const stuSize &_pageSize);
   DocBlockPtrVector_t findPageTextBlocks(
@@ -83,7 +84,8 @@ void clsPdfLa::enableDebugging(const std::string &_basename) {
 }
 
 float clsPdfLaInternals::computeWordSeparationThreshold(
-    const DocItemPtrVector_t &_sortedDocItems, float _width) {
+    const DocItemPtrVector_t &_sortedDocItems, float _meanCharWidth,
+    float _width) {
   constexpr float MIN_ACKNOWLEDGABLE_DISTANCE = 3.f;
   constexpr float WORD_SEPARATION_THRESHOLD_MULTIPLIER = 1.5f;
 
@@ -95,8 +97,9 @@ float clsPdfLaInternals::computeWordSeparationThreshold(
     if (ThisItem->BoundingBox.verticalOverlap(PrevItem->BoundingBox) >
         MIN_ITEM_SIZE) {
       auto dx = static_cast<int32_t>(ThisItem->BoundingBox.left() -
-                                     PrevItem->BoundingBox.right() + 0.5);
-      if (dx >= MIN_ACKNOWLEDGABLE_DISTANCE) {
+                                     PrevItem->BoundingBox.right() + 0.5f);
+      if (dx >= MIN_ACKNOWLEDGABLE_DISTANCE &&
+          dx <= MAX_WORD_SEPARATION_TO_MEAN_CHAR_WIDTH_RATIO * _meanCharWidth) {
         ++HorzDistanceHistogram[dx];
         if (dx > 1) ++HorzDistanceHistogram[dx - 1];
         if (dx < static_cast<int32_t>(HorzDistanceHistogram.size()) - 1)
@@ -183,18 +186,14 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
 
 BoundingBoxPtrVector_t clsPdfLaInternals::getWhitespaceCoverage(
     const DocItemPtrVector_t &_sortedDocItems, const stuSize &_pageSize,
-    float _wordSeparationThreshold) {
+    float _meanCharWidth, float _wordSeparationThreshold) {
   constexpr float APPROXIMATE_FULL_OVERLAP_RATIO = 0.95f;
 
   DocItemPtrVector_t Blobs;
   DocItemPtr_t PrevItem = nullptr;
-  float MeanCharWidth = 0;
-  size_t NumberOfChars = 0;
   for (size_t i = 0; i < _sortedDocItems.size(); ++i) {
     const auto &ThisItem = _sortedDocItems.at(i);
     if (ThisItem->Type != enuDocItemType::Char) continue;
-    MeanCharWidth += ThisItem->BoundingBox.width();
-    ++NumberOfChars;
     if (Blobs.empty()) {
       Blobs.push_back(std::make_shared<stuDocItem>(*ThisItem));
       PrevItem = ThisItem;
@@ -215,7 +214,6 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getWhitespaceCoverage(
       Blobs.push_back(std::make_shared<stuDocItem>(*ThisItem));
     PrevItem = ThisItem;
   }
-  if (NumberOfChars > 0) MeanCharWidth /= static_cast<float>(NumberOfChars);
 
   for (const auto &Item :
        filter(_sortedDocItems, [](const DocItemPtr_t &_item) {
@@ -232,7 +230,7 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getWhitespaceCoverage(
           [](const DocItemPtr_t &Item) {
             return std::make_shared<stuBoundingBox>(Item->BoundingBox);
           }),
-      MeanCharWidth);
+      _meanCharWidth);
 
   auto Cover = filter(RawCover, [](const BoundingBoxPtr_t &a) {
     return a->width() < a->height();
@@ -269,20 +267,26 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getWhitespaceCoverage(
   return Cover;
 }
 
-bool itemBelongsToLine(const DocItemPtr_t &_item, const DocLinePtr_t &_line) {
+template <typename Item1_t, typename Item2_t>
+bool areHorizontallyOnSameLine(const Item1_t &_item1, const Item2_t &_item2) {
   float HorizontalOverlap =
-      _line->BoundingBox.horizontalOverlap(_item->BoundingBox);
-  if (HorizontalOverlap <= -2.5f * std::max(_item->BoundingBox.height(),
-                                            _line->BoundingBox.height()))
+      _item2->BoundingBox.horizontalOverlap(_item1->BoundingBox);
+  if (HorizontalOverlap <= -2.5f * std::max(_item1->BoundingBox.height(),
+                                            _item2->BoundingBox.height()))
     return false;
+  return true;
+}
+
+template <typename Item1_t, typename Item2_t>
+bool areVerticallyOnSameLine(const Item1_t &_item1, const Item2_t &_item2) {
   float VerticalOverlap =
-      _line->BoundingBox.verticalOverlap(_item->BoundingBox);
-  if ((_item->BoundingBox.height() < 0.5f * _line->BoundingBox.height()) ||
-      (_line->BoundingBox.height() < 0.5f * _item->BoundingBox.height())) {
+      _item2->BoundingBox.verticalOverlap(_item1->BoundingBox);
+  if ((_item1->BoundingBox.height() < 0.5f * _item2->BoundingBox.height()) ||
+      (_item2->BoundingBox.height() < 0.5f * _item1->BoundingBox.height())) {
     return VerticalOverlap > MIN_ITEM_SIZE;
   } else {
-    return VerticalOverlap > 0.5f * std::min(_item->BoundingBox.height(),
-                                             _line->BoundingBox.height());
+    return VerticalOverlap > 0.5f * std::min(_item1->BoundingBox.height(),
+                                             _item2->BoundingBox.height());
   }
 }
 
@@ -293,50 +297,17 @@ clsPdfLaInternals::findPageLinesAndFigures(const DocItemPtrVector_t &_docItems,
       std::move(split(_docItems, [&](const DocItemPtr_t &e) {
         return e->Type != enuDocItemType::Char;
       }));
-  std::sort(
-      SortedFigures.begin(), SortedFigures.end(),
-      [](const DocItemPtr_t &a, const DocItemPtr_t &b) {
-        if (a->BoundingBox.verticalOverlap(b->BoundingBox) > MIN_ITEM_SIZE)
-          return a->BoundingBox.left() < b->BoundingBox.left();
-        return a->BoundingBox.top() < b->BoundingBox.top();
-      });
+  sortByBoundingBoxes<enuBoundingBoxOrdering::T2BL2R>(SortedFigures);
+  sortByBoundingBoxes<enuBoundingBoxOrdering::T2BL2R>(SortedChars);
 
-  std::sort(SortedChars.begin(), SortedChars.end(),
-            [](const DocItemPtr_t &a, const DocItemPtr_t &b) {
-              return a->BoundingBox.top() < b->BoundingBox.top();
-            });
-  
-  for(size_t Y = 0; Y < static_cast<size_t>(_pageSize.Height); ++Y) {
-    auto Subset = filter(SortedChars, [&](const DocItemPtr_t &e) { return e->BoundingBox.top() <= Y && e->BoundingBox.bottom() >= Y; });
-    if(Subset.size() == 0)
-      continue;
-    for(size_t i = 1; i < Subset.size(); ++i) {
-      size_t Position = i;
-      for(size_t j = i; j > 0; --j) {
-        if(Subset[i]->BoundingBox.left() > Subset[j - 1]->BoundingBox.left())
-          Position = j - 1;
-      }
-      if(Position != i) {
-        auto Copy = Subset[i];
-        for(size_t j = i; j > Position; --j)
-          Subset[j] = Subset[j - 1];
-        Subset[Position] = Copy;
-      }
-    }
-    for(size_t i = 1; i < Subset.size(); ++i) {
-      if(Subset[i]->BoundingBox.left() > Subset[i - 1]->BoundingBox.left()) {
-        std::cout << "TROUBLE" << std::endl;
-      }
-      if(Subset[i]->BoundingBox.left() == Subset[i - 1]->BoundingBox.left()) {
-        std::cout << "POSSIBLE TROUBLE" << std::endl;
-      }
-    }
-  }
-
-  auto WordSeparationThreshold =
-      this->computeWordSeparationThreshold(SortedChars, _pageSize.Width);
-  auto WhitespaceCover = this->getWhitespaceCoverage(
-      cat(SortedChars, SortedFigures), _pageSize, WordSeparationThreshold);
+  auto MeanCharWidth = mean(SortedChars, [](const DocItemPtr_t &e) {
+    return e->BoundingBox.width();
+  });
+  auto WordSeparationThreshold = this->computeWordSeparationThreshold(
+      SortedChars, MeanCharWidth, _pageSize.Width);
+  auto WhitespaceCover =
+      this->getWhitespaceCoverage(cat(SortedChars, SortedFigures), _pageSize,
+                                  MeanCharWidth, WordSeparationThreshold);
 
   DocItemPtrVector_t ResultFigures;
   for (const auto &Item : SortedFigures) {
@@ -359,7 +330,8 @@ clsPdfLaInternals::findPageLinesAndFigures(const DocItemPtrVector_t &_docItems,
   for (const auto &Item : SortedChars) {
     DocLinePtr_t Line = nullptr;
     for (auto &ResultItem : ResultLines)
-      if (itemBelongsToLine(Item, ResultItem)) {
+      if (areHorizontallyOnSameLine(Item, ResultItem) &&
+          areVerticallyOnSameLine(Item, ResultItem)) {
         auto Union = ResultItem->BoundingBox.unionWith(Item->BoundingBox);
         bool OverlapsWithCover = false;
         for (const auto &CoverItem : WhitespaceCover)
@@ -371,18 +343,6 @@ clsPdfLaInternals::findPageLinesAndFigures(const DocItemPtrVector_t &_docItems,
         if (OverlapsWithCover) continue;
         Line = ResultItem;
       }
-    if (Line.get() == nullptr) {
-      clsPdfLaDebug::instance().showDebugImage(
-          this, "Item NO LINE", DEBUG_UPSCALE_FACTOR, ResultLines,
-          DocItemPtrVector_t{Item});
-      std::cout << "Bounds: (" << Item->BoundingBox.left() << ","
-                << Item->BoundingBox.top() << "," << Item->BoundingBox.right()
-                << "," << Item->BoundingBox.bottom() << ")" << std::endl;
-    }
-    // else
-    //   clsPdfLaDebug::instance().showDebugImage(this, "ITEM WITH LINE",
-    //   DEBUG_UPSCALE_FACTOR, ResultLines, DocLinePtrVector_t {Line},
-    //   DocItemPtrVector_t {Item});
 
     if (Line.get() == nullptr) {
       Line = std::make_shared<stuDocLine>();
@@ -392,6 +352,55 @@ clsPdfLaInternals::findPageLinesAndFigures(const DocItemPtrVector_t &_docItems,
     Line->BoundingBox.unionWith_(Item->BoundingBox);
     Line->Items.push_back(Item);
   }
+
+  clsPdfLaDebug::instance().showDebugImage(this, "Segments",
+                                           DEBUG_UPSCALE_FACTOR, ResultLines);
+
+  for (auto &LineSegment : ResultLines) {
+    if (LineSegment.get() == nullptr) continue;
+    std::vector<size_t> IndexesOfSegmentsOfSameLine;
+    for (size_t i = 0; i < ResultLines.size(); ++i) {
+      auto &l = ResultLines[i];
+      if (l.get() == nullptr) continue;
+      if (!areVerticallyOnSameLine(LineSegment, l)) continue;
+      auto Union = LineSegment->BoundingBox.unionWith(l->BoundingBox);
+      bool OverlapsWithCover = false;
+      for (const auto &CoverItem : WhitespaceCover)
+        if (CoverItem->hasIntersectionWith(Union) &&
+            CoverItem->verticalOverlap(Union) > 3) {
+          OverlapsWithCover = true;
+          break;
+        }
+      if (OverlapsWithCover) continue;
+      IndexesOfSegmentsOfSameLine.push_back(i);
+    };
+    if (IndexesOfSegmentsOfSameLine.size() == 0) continue;
+    std::sort(IndexesOfSegmentsOfSameLine.begin(),
+              IndexesOfSegmentsOfSameLine.end(), [&](size_t a, size_t b) {
+                return ResultLines[a]->BoundingBox.left() <
+                       ResultLines[b]->BoundingBox.left();
+              });
+    DocLinePtr_t Merged;
+    for (size_t i : IndexesOfSegmentsOfSameLine) {
+      if (Merged.get() == nullptr)
+        Merged = ResultLines[i];
+      else {
+        if (Merged->BoundingBox.horizontalOverlap(ResultLines[i]->BoundingBox))
+          break;
+        Merged->mergeWith_(ResultLines[i]);
+      }
+      ResultLines[i].reset();
+    }
+    LineSegment = Merged;
+    sortByBoundingBoxes<enuBoundingBoxOrdering::L2R>(LineSegment->Items);
+  }
+
+  ResultLines = filter(
+      ResultLines, [](const DocLinePtr_t &l) { return l.get() != nullptr; });
+
+  clsPdfLaDebug::instance().showDebugImage(this, "Lines", DEBUG_UPSCALE_FACTOR,
+                                           ResultLines);
+
   return std::make_tuple(ResultLines, ResultFigures);
 }
 
@@ -399,12 +408,7 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
     const DocLinePtrVector_t &_pageLines,
     const DocItemPtrVector_t &_pageFigures) {
   auto SortedLines = _pageLines;
-  std::sort(SortedLines.begin(), SortedLines.end(),
-            [&](const DocLinePtr_t &a, const DocLinePtr_t &b) {
-              if (a->BoundingBox.horizontalOverlap(b->BoundingBox))
-                return a->BoundingBox.top() < b->BoundingBox.top();
-              return a->BoundingBox.left() < b->BoundingBox.left();
-            });
+  sortByBoundingBoxes<enuBoundingBoxOrdering::L2RT2B>(SortedLines);
 
   clsPdfLaDebug::instance().showDebugImage(this, "LINES", DEBUG_UPSCALE_FACTOR,
                                            SortedLines);

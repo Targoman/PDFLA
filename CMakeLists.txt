@@ -28,6 +28,7 @@ tg_add_library_headers(pdfla
     PUBLIC_HEADER
     libsrc/pdfla.h
     libsrc/dla.h
+    libsrc/type_traits.hpp
 )
 
 tg_add_library_headers(pdfla

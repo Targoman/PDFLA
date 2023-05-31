@@ -1,11 +1,13 @@
 #ifndef __TARGOMAN_DLA__
 #define __TARGOMAN_DLA__
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <string>
-#include <typeinfo>
 #include <vector>
+
+#include "type_traits.hpp"
 
 namespace Targoman {
 namespace DLA {
@@ -42,8 +44,8 @@ struct stuSize {
            std::abs(this->Height - _other.Height) < MIN_ITEM_SIZE;
   }
 
-  bool operator!= (const stuSize &_other) const {
-    return !(this->operator== (_other));
+  bool operator!=(const stuSize &_other) const {
+    return !(this->operator==(_other));
   }
 };
 
@@ -123,6 +125,94 @@ struct stuBoundingBox {
 };
 typedef std::vector<BoundingBoxPtr_t> BoundingBoxPtrVector_t;
 
+enum class enuBoundingBoxOrdering { L2R, T2B, L2RT2B, T2BL2R };
+
+struct stuBoxBoundedItem {
+  stuBoundingBox BoundingBox;
+  stuBoxBoundedItem() {}
+  stuBoxBoundedItem(const stuBoundingBox &_boundingBox)
+      : BoundingBox(_boundingBox) {}
+};
+
+template <enuBoundingBoxOrdering O>
+struct stuBoundingBoxComparatorImpl {};
+
+template <>
+struct stuBoundingBoxComparatorImpl<enuBoundingBoxOrdering::L2R> {
+  bool operator()(const stuBoundingBox &a, const stuBoundingBox &b) {
+    return a.left() < b.left();
+  }
+};
+
+template <>
+struct stuBoundingBoxComparatorImpl<enuBoundingBoxOrdering::L2RT2B> {
+  bool operator()(const stuBoundingBox &a, const stuBoundingBox &b) {
+    if (a.horizontalOverlap(b) > MIN_ITEM_SIZE) return a.top() < b.top();
+    return a.left() < b.left();
+  }
+};
+
+template <>
+struct stuBoundingBoxComparatorImpl<enuBoundingBoxOrdering::T2B> {
+  bool operator()(const stuBoundingBox &a, const stuBoundingBox &b) {
+    return a.top() < b.top();
+  }
+};
+
+template <>
+struct stuBoundingBoxComparatorImpl<enuBoundingBoxOrdering::T2BL2R> {
+  bool operator()(const stuBoundingBox &a, const stuBoundingBox &b) {
+    if (a.verticalOverlap(b) > MIN_ITEM_SIZE) return a.left() < b.left();
+    return a.top() < b.top();
+  }
+};
+
+template <typename T, enuBoundingBoxOrdering O, typename = void>
+struct stuBoundingBoxComparator {};
+
+template <typename T, enuBoundingBoxOrdering O>
+struct stuBoundingBoxComparator<
+    T, O,
+    typename Targoman::Common::stuContainerTypeTraits<T>::stuOnlyForPointers::type> {
+  using U = typename Targoman::Common::stuContainerTypeTraits<T>::ElementType_t;
+  using V = typename Targoman::Common::stuSharedPtrTypeTraits<
+      typename Targoman::Common::stuContainerTypeTraits<T>::ElementBareType_t>::
+      ElementType_t;
+  bool operator()(const U &a, const U &b) {
+    return stuBoundingBoxComparator<std::vector<V>,
+                                    enuBoundingBoxOrdering::T2BL2R>()(*a, *b);
+  }
+};
+
+template <typename T, enuBoundingBoxOrdering O>
+struct stuBoundingBoxComparator<
+    T, O,
+    typename Targoman::Common::stuContainerTypeTraits<T>::stuOnlyForNonPointers<
+        stuBoxBoundedItem>::type> {
+  using U = typename Targoman::Common::stuContainerTypeTraits<T>::ElementType_t;
+  bool operator()(const U &a, const U &b) {
+    return stuBoundingBoxComparatorImpl<enuBoundingBoxOrdering::T2BL2R>()(
+        a.BoundingBox, b.BoundingBox);
+  }
+};
+
+template <typename T, enuBoundingBoxOrdering O>
+struct stuBoundingBoxComparator<
+    T, O,
+    typename Targoman::Common::stuContainerTypeTraits<T>::OnlyForNonPointers_t<
+        stuBoundingBox>> {
+  using U = typename Targoman::Common::stuContainerTypeTraits<T>::ElementType_t;
+  bool operator()(const U &a, const U &b) {
+    return stuBoundingBoxComparatorImpl<enuBoundingBoxOrdering::T2BL2R>()(a, b);
+  }
+};
+
+template <enuBoundingBoxOrdering O, typename T>
+void sortByBoundingBoxes(T &_container) {
+  std::sort(_container.begin(), _container.end(),
+            stuBoundingBoxComparator<T, O>());
+}
+
 enum class enuDocItemType {
   None,
   Image,
@@ -143,15 +233,14 @@ enum class enuDocArea {
   Watermark
 };
 
-struct stuDocItem {
-  stuBoundingBox BoundingBox;
+struct stuDocItem : public stuBoxBoundedItem {
   enuDocItemType Type;
   int32_t RepetitionPageOffset;
   float Baseline, Ascent, Descent;
   wchar_t Char;
   stuDocItem(const stuBoundingBox &_boundingBox, enuDocItemType _type,
              float _baseline, float _ascent, float _descent, wchar_t _char)
-      : BoundingBox(_boundingBox),
+      : stuBoxBoundedItem(_boundingBox),
         Type(_type),
         Baseline(_baseline),
         Ascent(_ascent),
@@ -163,8 +252,7 @@ typedef std::vector<DocItemPtr_t> DocItemPtrVector_t;
 
 enum class enuDocBlockType { Text, Figure, Table, Formulae };
 
-struct stuDocBlock {
-  stuBoundingBox BoundingBox;
+struct stuDocBlock : public stuBoxBoundedItem {
   enuDocArea Area;
   enuDocBlockType Type;
   DocItemPtrVector_t Elements;
@@ -187,16 +275,19 @@ typedef std::vector<clsDocBlockPtr> DocBlockPtrVector_t;
 
 enum class enuListType { None, Bulleted, Numbered };
 
-struct stuDocLine {
-  stuBoundingBox BoundingBox;
+struct stuDocLine;
+typedef std::shared_ptr<stuDocLine> DocLinePtr_t;
+typedef std::vector<DocLinePtr_t> DocLinePtrVector_t;
+struct stuDocLine : public stuBoxBoundedItem {
   float Baseline;
   int32_t ID;
   enuListType ListType;
   float TextLeft;
   DocItemPtrVector_t Items;
+
+  void mergeWith_(const stuDocLine &_otherLine);
+  void mergeWith_(const DocLinePtr_t &_otherLine);
 };
-typedef std::shared_ptr<stuDocLine> DocLinePtr_t;
-typedef std::vector<DocLinePtr_t> DocLinePtrVector_t;
 
 enum class enuDocTextBlockAssociation { None, IsCaptionOf, IsInsideOf };
 struct stuDocTextBlock : public stuDocBlock {
