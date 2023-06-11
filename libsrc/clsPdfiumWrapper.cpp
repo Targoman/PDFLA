@@ -412,8 +412,8 @@ DocItemPtrVector_t clsPdfiumWrapper::getPageItems(size_t _pageIndex)
     BoundingRect.Intersect(PageRect);
     stuBoundingBox BBox(BoundingRect.left, BoundingRect.bottom,
                         BoundingRect.right, BoundingRect.top);
-    Result.push_back(
-        std::make_shared<stuDocItem>(BBox, Type, NAN, NAN, NAN, 0));
+    Result.push_back(std::make_shared<stuDocItem>(
+        BBox, Type, BBox.bottom(), BBox.top(), BBox.bottom(), 0.f, 0));
   };
 
   auto appendTextObject = [&](CPDF_TextObject *_textObject) {
@@ -547,7 +547,7 @@ DocItemPtrVector_t clsPdfiumWrapper::getPageItems(size_t _pageIndex)
                              BoundingRect.top),
               enuDocItemType::Char, Baseline,
               std::min(Ascent, BoundingRect.bottom),
-              std::max(Descent, BoundingRect.top),
+              std::max(Descent, BoundingRect.top), Angle,
               static_cast<wchar_t>(Unicode.GetAt(j))));
         }
       }

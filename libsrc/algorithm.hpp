@@ -3,137 +3,228 @@
 
 #include <stdint.h>
 
+#include <algorithm>
 #include <limits>
+#include <numeric>
 #include <vector>
+
+#include "type_traits.hpp"
 
 namespace Targoman {
 namespace Common {
 
 template <typename T0, typename Functor_t>
-auto map(const std::vector<T0> &v, Functor_t f) {
-  using T1 = decltype(std::declval<Functor_t>()(std::declval<T0>()));
+auto map(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  using T1 = decltype(std::declval<Functor_t>()(
+      std::declval<typename ContainerTraits_t::ElementType_t>()));
   std::vector<T1> Result;
-  Result.reserve(v.size());
-  for (const auto &Item : v) Result.push_back(f(Item));
+  std::transform(v.begin(), v.end(), std::back_inserter(Result), f);
   return Result;
 }
 
-template <typename T, typename Functor_t>
-std::vector<T> filter(const std::vector<T> &v, Functor_t f) {
-  std::vector<T> Result;
-  Result.reserve(v.size());
-  for (const auto &Item : v)
-    if (f(Item)) Result.push_back(Item);
-  Result.shrink_to_fit();
+template <typename T0, typename Functor_t>
+auto filter(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`filter` only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  std::vector<T1> Result;
+  std::copy_if(v.begin(), v.end(), std::back_inserter(Result), f);
   return Result;
 }
 
-template <typename T, typename Functor_t>
-std::tuple<std::vector<T>, std::vector<T>> split(const std::vector<T> &v,
-                                                 Functor_t f) {
-  std::vector<T> Conforms, DoesNotConform;
-  for (const auto &Item : v)
-    if (f(Item))
-      Conforms.push_back(Item);
-    else
-      DoesNotConform.push_back(Item);
+template <typename T0, typename Functor_t>
+void filter_(T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`filter` only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  v.erase(
+      std::remove_if(v.begin(), v.end(), [&f](const T1 &e) { return !f(e); }),
+      v.end());
+}
+
+template <typename T0>
+void filterNullPtrs_(T0 &v) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "filterNullPtrs_ only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  v.erase(std::remove_if(v.begin(), v.end(),
+                         [](const T1 &e) { return e == nullptr; }),
+          v.end());
+}
+
+template <typename T0, typename Functor_t>
+auto split(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`split` only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  std::vector<T1> Conforms, DoesNotConform;
+  std::partition_copy(v.begin(), v.end(), std::back_inserter(Conforms),
+                      std::back_inserter(DoesNotConform), f);
   return std::make_tuple(Conforms, DoesNotConform);
 }
 
-template <typename T, typename Functor_t>
-const T &max(const std::vector<T> &v, Functor_t f) {
-  const T *Max = &v[0];
-  auto Value = f(v[0]);
-  for (size_t i = 1; i < v.size(); ++i) {
-    auto NewValue = f(v[i]);
-    if (NewValue > Value) {
-      Max = &v[i];
-      Value = NewValue;
-    }
-  }
-  return *Max;
-}
-
-template <typename T, typename Functor_t>
-int32_t argmax(const std::vector<T> &v, Functor_t f) {
-  int32_t Result = 0;
-  auto Value = f(v[0]);
-  for (size_t i = 1; i < v.size(); ++i) {
-    auto NewValue = f(v[i]);
-    if (NewValue > Value) {
-      Result = i;
-      Value = NewValue;
-    }
-  }
-  return Result;
-}
-
-template <typename T, typename Functor_t>
-const T &min(const std::vector<T> &v, Functor_t f) {
-  const T *Min = &v[0];
-  auto Value = f(v[0]);
-  for (size_t i = 1; i < v.size(); ++i) {
-    auto NewValue = f(v[i]);
-    if (NewValue < Value) {
-      Min = &v[i];
-      Value = NewValue;
-    }
-  }
-  return *Min;
-}
-
-template <typename T, typename Functor_t>
-int32_t argmin(const std::vector<T> &v, Functor_t f) {
-  int32_t Result = 0;
-  auto Value = f(v[0]);
-  for (size_t i = 1; i < v.size(); ++i) {
-    auto NewValue = f(v[i]);
-    if (NewValue < Value) {
-      Result = i;
-      Value = NewValue;
-    }
-  }
-  return Result;
+template <typename T0, typename Functor_t>
+const auto &maxElement(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`maxElement` only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  return *std::max_element(v.begin(), v.end(), [&f](const T1 &a, const T1 &b) {
+    return f(a) < f(b);
+  });
 }
 
 template <typename T0, typename Functor_t>
-auto mean(const std::vector<T0> &v, Functor_t f) {
-  using T1 = decltype(std::declval<Functor_t>()(std::declval<T0>()));
-  T1 Result = 0;
-  for (const auto &e : v) Result += f(e);
-  if (v.size() > 0) Result /= static_cast<T1>(v.size());
-  return Result;
+auto argmax(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`argmax` only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  return std::distance(
+      v.begin(),
+      std::max_element(v.begin(), v.end(),
+                       [&f](const T1 &a, const T1 &b) { return f(a) < f(b); }));
 }
 
 template <typename T0, typename Functor_t>
-auto var(const std::vector<T0> &v, Functor_t f) {
-  using T1 = decltype(std::declval<Functor_t>()(std::declval<T0>()));
-  T1 Mean = 0;
-  T1 MeanSquares = 0;
-  for (const auto &e : v) {
-    Mean += f(e);
-    MeanSquares += f(e) * f(e);
-  }
-  if (v.size() == 0) return static_cast<T1>(0);
-  T1 N = static_cast<T1>(v.size());
-  MeanSquares /= N;
-  Mean /= N;
-  return (MeanSquares - Mean * Mean);
+const auto &minElement(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`minElement` only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  return *std::min_element(v.begin(), v.end(), [&f](const T1 &a, const T1 &b) {
+    return f(a) < f(b);
+  });
 }
 
 template <typename T0, typename Functor_t>
-auto std(const std::vector<T0> &v, Functor_t f) {
-  using T1 = decltype(std::declval<Functor_t>()(std::declval<T0>()));
+auto argmin(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`argmin` only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  return std::distance(
+      v.begin(),
+      std::min_element(v.begin(), v.end(),
+                       [&f](const T1 &a, const T1 &b) { return f(a) < f(b); }));
+}
+
+template <typename T0, typename Functor_t>
+auto max(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`max` only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  using T2 = BareType_t<decltype(std::declval<Functor_t>()(std::declval<T1>()))>;
+  if(v.empty())
+    return T2();
+  return f(*std::max_element(
+      v.begin(), v.end(),
+      [&f](const T1 &a, const T1 &b) { return f(a) < f(b); }));
+}
+
+template <typename T0, typename Functor_t>
+auto min(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`min` only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  using T2 = BareType_t<decltype(std::declval<Functor_t>()(std::declval<T1>()))>;
+  if(v.empty())
+    return T2();
+  return f(*std::min_element(
+      v.begin(), v.end(),
+      [&f](const T1 &a, const T1 &b) { return f(a) < f(b); }));
+}
+
+template <typename T0, typename Functor_t>
+auto mean(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`mean` only works on containers");
+  using T1 = BareType_t<decltype(std::declval<Functor_t>()(
+      std::declval<typename ContainerTraits_t::ElementType_t>()))>;
+  if (v.empty()) return static_cast<T1>(0);
+  return std::accumulate(v.begin(), v.end(), static_cast<T1>(0),
+                         [&f](auto sum, auto e) { return sum + f(e); }) /
+         static_cast<T1>(v.size());
+}
+
+template <typename T0, typename Functor_t>
+auto var(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`var` only works on containers");
+  using T1 = BareType_t<decltype(std::declval<Functor_t>()(
+      std::declval<typename ContainerTraits_t::ElementType_t>()))>;
+  if (v.empty()) return static_cast<T1>(0);
+  T1 Mean = mean(v, f);
+  return std::accumulate(
+             v.begin(), v.end(), static_cast<T1>(0),
+             [&f, &Mean](auto sum, auto e) { return sum + (f(e) - Mean); }) /
+         static_cast<T1>(v.size());
+}
+
+template <typename T0, typename Functor_t>
+auto std(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`std` only works on containers");
+  using T1 = BareType_t<decltype(std::declval<Functor_t>()(
+      std::declval<typename ContainerTraits_t::ElementType_t>()))>;
+  if (v.empty()) return static_cast<T1>(0);
   auto Var = var(v, f);
   if (Var > std::numeric_limits<T1>::epsilon()) return sqrt(Var);
   return 0;
 }
 
-template <typename T>
-std::vector<T> cat(const std::vector<T> &a, const std::vector<T> &b) {
-  std::vector<T> Result = a;
+template <typename T0, typename T1>
+auto cat(const T0 &a, const T1 &b) {
+  using ContainerTraits0_t = stuContainerTypeTraits<T0>;
+  using ContainerTraits1_t = stuContainerTypeTraits<T1>;
+  static_assert(
+      ContainerTraits0_t::IsContainer && ContainerTraits1_t::IsContainer,
+      "`cat` only works on containers");
+  using T2 = BareType_t<decltype(*std::declval<T0>().begin())>;
+  static_assert(
+      std::is_same_v<T2, BareType_t<decltype(*std::declval<T1>().begin())>>,
+      "Both containers must have same element type for `cat` to work");
+  std::vector<T2> Result;
+  Result.insert(Result.end(), a.begin(), a.end());
   Result.insert(Result.end(), b.begin(), b.end());
   return Result;
+}
+
+template <typename T0, typename Functor_t>
+bool any(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`any` only works on containers");
+  if (v.empty()) return false;
+  return std::any_of(v.begin(), v.end(), f);
+}
+
+template <typename T0, typename Functor_t>
+bool all(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`all` only works on containers");
+  if (v.empty()) return false;
+  return std::all_of(v.begin(), v.end(), f);
+}
+
+template <typename T0, typename Functor_t>
+bool none(const T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`none` only works on containers");
+  if (v.empty()) return false;
+  return std::none_of(v.begin(), v.end(), f);
 }
 
 }  // namespace Common

@@ -25,8 +25,8 @@ struct stuSharedPtrTypeTraits<std::shared_ptr<T>> {
   typedef BareType_t<T> ElementBareType_t;
 };
 
-template <typename T>
-using ContainerElementType_t = decltype(*std::declval<T>().begin());
+template<typename T>
+constexpr bool IsSharedPtr = stuSharedPtrTypeTraits<T>::IsSharedPtr; 
 
 template <typename T, typename=void>
 struct stuContainerTypeTraits {
@@ -51,6 +51,9 @@ struct stuContainerTypeTraits<T, decltype((void)std::declval<T>().begin())> {
       std::enable_if<ContainsPointerOrSharedPtr == false &&
                        std::is_base_of_v<RequiredBase_t, ElementBareType_t>>;
 };
+
+template<typename T, typename=void>
+constexpr bool IsContainer = stuContainerTypeTraits<T>::IsContainer;
 
 }  // namespace Common
 }  // namespace Targoman

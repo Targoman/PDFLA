@@ -178,5 +178,16 @@ void stuDocLine::mergeWith_(const DocLinePtr_t &_otherLine) {
   return this->mergeWith_(*_otherLine);
 }
 
+void stuDocTextBlock::mergeWith_(const stuDocTextBlock &_otherBlock) {
+  this->BoundingBox.unionWith_(_otherBlock.BoundingBox);
+  this->Lines.insert(this->Lines.end(), _otherBlock.Lines.begin(),
+                     _otherBlock.Lines.end());
+}
+
+void stuDocTextBlock::mergeWith_(const clsDocBlockPtr &_otherBlock) {
+  if (_otherBlock->Type != enuDocBlockType::Text) return;
+  this->mergeWith_(*(_otherBlock.asText()));
+}
+
 }  // namespace DLA
 }  // namespace Targoman

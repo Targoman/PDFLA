@@ -51,6 +51,7 @@ bool clsPdfLaDebug::pageImageExists(const void* _object, size_t _pageIndex) {
 }
 
 cv::Mat bufferToMat(const std::vector<uint8_t>& _data, const stuSize& _size) {
+  if (_data.size() == 0 || _size.area() < MIN_ITEM_SIZE) return cv::Mat();
   cv::Mat Result(_size.Height, _size.Width, CV_8UC3);
   size_t Height = static_cast<size_t>(_size.Height);
   size_t Width = static_cast<size_t>(_size.Width);
@@ -101,100 +102,133 @@ cv::Rect bbox2CvRect(const stuBoundingBox& _bbox) {
                   static_cast<int>(_bbox.height()));
 }
 
-class clsPdfLaDebugImageHelper {
- public:
-  static auto createDebugImage(
-      clsPdfLaDebug* _pdfLaDebug, const void* _object, const std::string& _tag,
-      const std::vector<std::vector<const stuBoundingBox*>>& _boundingBoxes,
-      float _scale) {
-    using T = std::tuple<cv::Mat, std::string, size_t>;
-    constexpr int COLORS[][3] = {
-        {0, 80, 0}, {0, 0, 255}, {80, 20, 150}, {0, 180, 180}};
-    constexpr size_t COLORS_SIZE = sizeof COLORS / sizeof COLORS[0];
-
-    auto DebugDataIterator = _pdfLaDebug->DebugData.find(_object);
-    if (DebugDataIterator == _pdfLaDebug->DebugData.end()) return T();
-
-    auto& PageImages = DebugDataIterator->second.PageImages;
-    auto PageImagesIterator =
-        PageImages.find(DebugDataIterator->second.CurrentPageIndex);
-    if (PageImagesIterator == PageImages.end()) return T();
-
-    auto [Data, Size] = PageImagesIterator->second;
-    cv::Mat PageImage = bufferToMat(Data, Size);
-    size_t ColorIndex = 0;
-    for (auto& BoundingBoxVector : _boundingBoxes) {
-      cv::Scalar FillColor(COLORS[ColorIndex][0], COLORS[ColorIndex][1],
-                           COLORS[ColorIndex][2]);
-      for (auto& BoundingBox : BoundingBoxVector) {
-        cv::Rect Rect = bbox2CvRect(BoundingBox->scale(_scale));
-        if (Rect.area() < 4) continue;
-        cv::Mat ROI(PageImage, Rect);
-        cv::Mat RoiCopy = ROI.clone();
-        cv::rectangle(RoiCopy, cv::Rect(0, 0, Rect.width, Rect.height),
-                      FillColor, -1);
-        cv::addWeighted(ROI, 0.3, RoiCopy, 0.7, 0, ROI);
-      }
-      ColorIndex = (++ColorIndex) % COLORS_SIZE;
-    }
-    return std::make_tuple(PageImage, DebugDataIterator->second.ObjectBasename,
-                           DebugDataIterator->second.CurrentPageIndex);
-  }
-};
-
-void clsPdfLaDebug::saveDebugImage(
-    const void* _object, const std::string& _tag,
-    const std::vector<std::vector<const stuBoundingBox*>>& _boundingBoxes,
-    float _scale) {
-  auto [PageImage, Basename, CurrentPageIndex] =
-      clsPdfLaDebugImageHelper::createDebugImage(this, _object, _tag,
-                                                 _boundingBoxes, _scale);
-  if (PageImage.empty()) return;
-  std::ostringstream ss;
-  ss << this->DebugOutputPath << "/" << Basename << "_" << _tag << "_p"
-     << std::setw(3) << CurrentPageIndex << ".png";
-
-  cv::imwrite(ss.str(), PageImage);
-}
-
-void clsPdfLaDebug::showDebugImage(
-    const void* _object, const std::string& _tag,
-    const std::vector<std::vector<const stuBoundingBox*>>& _boundingBoxes,
-    float _scale) {
-  auto [PageImage, Basename, CurrentPageIndex] =
-      clsPdfLaDebugImageHelper::createDebugImage(this, _object, _tag,
-                                                 _boundingBoxes, _scale);
-  if (PageImage.empty()) return;
-  std::ostringstream ss;
-  ss << Basename << "_" << _tag << "_p" << std::setw(3) << CurrentPageIndex
-     << ".png";
-
-  float X0 = NAN, Y0 = NAN, X1 = NAN, Y1 = NAN;
-  for(auto& v : _boundingBoxes)
-    for(auto& e : v) {
-      if(isnan(X0) || e->left() < X0)
-        X0 = e->left();
-      if(isnan(Y0) || e->top() < X0)
-        Y0 = e->top();
-      if(isnan(X1) || e->right() > X1)
-        X1 = e->right();
-      if(isnan(Y1) || e->bottom() > Y1)
-        Y1 = e->bottom();
-    }
-  
-  X0 = std::max(0.f, _scale * X0 - 10);
-  Y0 = std::max(0.f, _scale * Y0 - 10);
-  X1 = std::min((float)PageImage.cols, _scale * X1 + 10);
-  Y1 = std::min((float)PageImage.rows, _scale * Y1 + 10);
-
-  std::cerr << "Image with tag: " << ss.str() << std::endl;
-  cv::imshow(ss.str(), PageImage(cv::Range(Y0, Y1), cv::Range(X0, X1)));
-  cv::waitKey(0);
-  cv::destroyWindow(ss.str());
-}
-
 void clsPdfLaDebug::setDebugOutputPath(const std::string& _debugOutputPath) {
   this->DebugOutputPath = _debugOutputPath;
+}
+
+static bool NoMorePdfLaDebugImages = false;
+
+struct stuPdfLaDebugImageData {
+  cv::Mat PageImage;
+  std::string DebugOutputPath;
+  std::string Basename;
+  size_t PageIndex;
+  stuBoundingBox RoiBounds;
+  size_t ColorIndex;
+  stuPdfLaDebugImageData(const RawImageData_t& _imageData,
+                         const std::string& _debugOutputPath,
+                         const std::string& _basename, size_t _pageIndex)
+      : PageImage(
+            bufferToMat(std::get<0>(_imageData), std::get<1>(_imageData))),
+        DebugOutputPath(_debugOutputPath),
+        Basename(_basename),
+        PageIndex(_pageIndex),
+        RoiBounds(static_cast<float>(PageImage.cols),
+                  static_cast<float>(PageImage.rows), 0.f, 0.f),
+        ColorIndex(0) {}
+};
+
+clsPdfLaDebugImage::clsPdfLaDebugImage(const RawImageData_t& _imageData,
+                                       const std::string& _debugOutputPath,
+                                       const std::string& _basename,
+                                       size_t _pageIndex) {
+  if (NoMorePdfLaDebugImages) return;
+  this->Data.reset(new stuPdfLaDebugImageData(_imageData, _debugOutputPath,
+                                              _basename, _pageIndex));
+}
+
+clsPdfLaDebugImage::clsPdfLaDebugImage() {}
+
+constexpr int COLORS[][3] = {
+    {0, 80, 0}, {0, 0, 255}, {80, 20, 150}, {0, 180, 180}};
+constexpr size_t COLORS_SIZE = sizeof COLORS / sizeof COLORS[0];
+
+clsPdfLaDebugImage& clsPdfLaDebugImage::add(
+    const std::vector<const Targoman::DLA::stuBoundingBox*>& _boundingBoxes) {
+  if (_boundingBoxes.empty()) return *this;
+  if (this->Data.get() == nullptr) return *this;
+  size_t ColorIndex = this->Data->ColorIndex++;
+  this->Data->ColorIndex = (ColorIndex + 1) % COLORS_SIZE;
+
+  cv::Scalar FillColor(COLORS[ColorIndex][0], COLORS[ColorIndex][1],
+                       COLORS[ColorIndex][2]);
+  cv::Scalar BorderColor(COLORS[ColorIndex][0] / 3, COLORS[ColorIndex][1] / 3,
+                         COLORS[ColorIndex][2] / 3);
+  for (auto& BoundingBox : _boundingBoxes) {
+    if (BoundingBox == nullptr) continue;
+    this->Data->RoiBounds.unionWith_(*BoundingBox);
+    cv::Rect Rect = bbox2CvRect(BoundingBox->scale(DEBUG_UPSCALE_FACTOR));
+    if (Rect.area() < 4) continue;
+    cv::Mat ROI(this->Data->PageImage, Rect);
+    cv::Mat RoiCopy = ROI.clone();
+    cv::rectangle(RoiCopy, cv::Rect(0, 0, Rect.width, Rect.height), FillColor,
+                  -1);
+    cv::rectangle(RoiCopy, cv::Rect(3, 3, Rect.width - 6, Rect.height - 6), BorderColor,
+                  3);
+    cv::addWeighted(ROI, 0.3, RoiCopy, 0.7, 0, ROI);
+
+    cv::putText(this->Data->PageImage, std::to_string(ColorIndex), cv::Point(Rect.x, Rect.br().y), cv::FONT_HERSHEY_PLAIN, 3, cv::Scalar(0), 3);
+  }
+  return *this;
+}
+
+clsPdfLaDebugImage& clsPdfLaDebugImage::show(const std::string& _tag) {
+  if (this->Data.get() == nullptr) return *this;
+  if (this->Data->PageImage.empty()) return *this;
+
+  std::ostringstream ss;
+  ss << this->Data->Basename << "_" << _tag << "_p" << std::setw(3)
+     << this->Data->PageIndex << ".png";
+
+  stuBoundingBox Union = this->Data->RoiBounds;
+
+  Union.scale_(DEBUG_UPSCALE_FACTOR);
+  Union.inflate_(50);
+  Union.intersectWith_(stuBoundingBox(0, 0, this->Data->PageImage.cols,
+                                      this->Data->PageImage.rows));
+
+  auto ROI = this->Data->PageImage(bbox2CvRect(Union));
+  cv::Mat FinalImage;
+  if (ROI.rows > 700 || ROI.cols > 1000) {
+    double Scale = std::min((double)700 / ROI.rows, (double)1000 / ROI.cols);
+    cv::resize(ROI, FinalImage, cv::Size(), Scale, Scale, cv::INTER_LANCZOS4);
+  } else {
+    ROI.assignTo(FinalImage);
+  }
+
+  std::cerr << "Image with tag: " << ss.str() << std::endl;
+  cv::imshow(ss.str(), FinalImage);
+  if (cv::waitKey(0) == 'Q') NoMorePdfLaDebugImages = true;
+  cv::destroyWindow(ss.str());
+
+  return *this;
+}
+
+clsPdfLaDebugImage& clsPdfLaDebugImage::save(const std::string& _tag) {
+  if (this->Data.get() == nullptr) return *this;
+  if (this->Data->PageImage.empty()) return *this;
+
+  std::ostringstream ss;
+  ss << this->Data->DebugOutputPath << "/" << this->Data->Basename << "_"
+     << _tag << "_p" << std::setw(3) << this->Data->PageIndex << ".png";
+  cv::imwrite(ss.str(), this->Data->PageImage);
+
+  return *this;
+}
+
+template <>
+clsPdfLaDebugImage clsPdfLaDebug::createImage(const void* _object) {
+  if (NoMorePdfLaDebugImages) return clsPdfLaDebugImage();
+  auto DebugDataIterator = this->DebugData.find(_object);
+  if (DebugDataIterator == this->DebugData.end()) return clsPdfLaDebugImage();
+  auto PageIndex = DebugDataIterator->second.CurrentPageIndex;
+  auto PageImageDataIterator =
+      DebugDataIterator->second.PageImages.find(PageIndex);
+  if (PageImageDataIterator == DebugDataIterator->second.PageImages.end())
+    return clsPdfLaDebugImage();
+  return clsPdfLaDebugImage(
+      PageImageDataIterator->second, this->DebugOutputPath,
+      DebugDataIterator->second.ObjectBasename, PageIndex);
 }
 
 }  // namespace PDFLA

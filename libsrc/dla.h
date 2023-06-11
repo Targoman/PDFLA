@@ -11,14 +11,20 @@
 
 namespace Targoman {
 namespace DLA {
-constexpr float MIN_ITEM_SIZE = 0.01f;
+constexpr float MIN_ITEM_SIZE = 0.1f;
 
 struct stuPoint {
   float X, Y;
   stuPoint(float _x, float _y) : X(_x), Y(_y) {}
   stuPoint() : stuPoint(0.f, 0.f) {}
+  void scale_(float _scale) {
+    this->X *= _scale;
+    this->Y *= _scale;
+  }
   stuPoint scale(float _scale) const {
-    return stuPoint(this->X * _scale, this->Y * _scale);
+    auto Copy = *this;
+    Copy.scale(_scale);
+    return Copy;
   }
 };
 
@@ -35,8 +41,16 @@ struct stuSize {
   }
 
   stuSize(float _w = 0, float _h = 0) : Width(_w), Height(_h) {}
+
+  void scale_(float _scale) {
+    this->Width *= _scale;
+    this->Height *= _scale;
+  }
+
   stuSize scale(float _scale) const {
-    return stuSize(this->Width * _scale, this->Height * _scale);
+    auto Copy = *this;
+    Copy.scale_(_scale);
+    return Copy;
   }
 
   bool operator==(const stuSize &_other) const {
@@ -119,8 +133,28 @@ struct stuBoundingBox {
   bool contains(const stuBoundingBox &_other) const;
   bool contains(const BoundingBoxPtr_t &_other) const;
 
+  void scale_(float _scale) {
+    this->Origin.scale_(_scale);
+    this->Size.scale_(_scale);
+  }
+
   stuBoundingBox scale(float _scale) const {
-    return stuBoundingBox(this->Origin.scale(_scale), this->Size.scale(_scale));
+    auto Copy = *this;
+    Copy.scale_(_scale);
+    return Copy;
+  }
+
+  void inflate_(float _amount) {
+    this->Origin.X -= _amount;
+    this->Origin.Y -= _amount;
+    this->Size.Width += 2 * _amount;
+    this->Size.Height += 2 * _amount;
+  }
+
+  stuBoundingBox inflate(float _amount) const {
+    auto Copy = *this;
+    Copy.inflate_(_amount);
+    return Copy;
   }
 };
 typedef std::vector<BoundingBoxPtr_t> BoundingBoxPtrVector_t;
@@ -173,14 +207,14 @@ struct stuBoundingBoxComparator {};
 template <typename T, enuBoundingBoxOrdering O>
 struct stuBoundingBoxComparator<
     T, O,
-    typename Targoman::Common::stuContainerTypeTraits<T>::stuOnlyForPointers::type> {
+    typename Targoman::Common::stuContainerTypeTraits<
+        T>::stuOnlyForPointers::type> {
   using U = typename Targoman::Common::stuContainerTypeTraits<T>::ElementType_t;
   using V = typename Targoman::Common::stuSharedPtrTypeTraits<
       typename Targoman::Common::stuContainerTypeTraits<T>::ElementBareType_t>::
       ElementType_t;
   bool operator()(const U &a, const U &b) {
-    return stuBoundingBoxComparator<std::vector<V>,
-                                    enuBoundingBoxOrdering::T2BL2R>()(*a, *b);
+    return stuBoundingBoxComparator<std::vector<V>, O>()(*a, *b);
   }
 };
 
@@ -191,8 +225,7 @@ struct stuBoundingBoxComparator<
         stuBoxBoundedItem>::type> {
   using U = typename Targoman::Common::stuContainerTypeTraits<T>::ElementType_t;
   bool operator()(const U &a, const U &b) {
-    return stuBoundingBoxComparatorImpl<enuBoundingBoxOrdering::T2BL2R>()(
-        a.BoundingBox, b.BoundingBox);
+    return stuBoundingBoxComparatorImpl<O>()(a.BoundingBox, b.BoundingBox);
   }
 };
 
@@ -203,7 +236,7 @@ struct stuBoundingBoxComparator<
         stuBoundingBox>> {
   using U = typename Targoman::Common::stuContainerTypeTraits<T>::ElementType_t;
   bool operator()(const U &a, const U &b) {
-    return stuBoundingBoxComparatorImpl<enuBoundingBoxOrdering::T2BL2R>()(a, b);
+    return stuBoundingBoxComparatorImpl<O>()(a, b);
   }
 };
 
@@ -211,6 +244,13 @@ template <enuBoundingBoxOrdering O, typename T>
 void sortByBoundingBoxes(T &_container) {
   std::sort(_container.begin(), _container.end(),
             stuBoundingBoxComparator<T, O>());
+}
+
+template <enuBoundingBoxOrdering O, typename T>
+T sortedByBoundingBoxes(const T &_container) {
+  T Copy = _container;
+  sortByBoundingBoxes<O, T>(Copy);
+  return Copy;
 }
 
 enum class enuDocItemType {
@@ -236,16 +276,23 @@ enum class enuDocArea {
 struct stuDocItem : public stuBoxBoundedItem {
   enuDocItemType Type;
   int32_t RepetitionPageOffset;
-  float Baseline, Ascent, Descent;
+  float Baseline, Ascent, Descent, BaselineAngle;
   wchar_t Char;
   stuDocItem(const stuBoundingBox &_boundingBox, enuDocItemType _type,
-             float _baseline, float _ascent, float _descent, wchar_t _char)
+             float _baseline, float _ascent, float _descent,
+             float _baselineAngle, wchar_t _char)
       : stuBoxBoundedItem(_boundingBox),
         Type(_type),
         Baseline(_baseline),
         Ascent(_ascent),
         Descent(_descent),
+        BaselineAngle(_baselineAngle),
         Char(_char) {}
+  stuBoundingBox BoundsInLine() const {
+    if (this->Type != enuDocItemType::Char) return this->BoundingBox;
+    return stuBoundingBox(this->BoundingBox.left(), this->Ascent,
+                          this->BoundingBox.right(), this->Descent);
+  }
 };
 typedef std::shared_ptr<stuDocItem> DocItemPtr_t;
 typedef std::vector<DocItemPtr_t> DocItemPtrVector_t;
@@ -269,6 +316,11 @@ class clsDocBlockPtr : public std::shared_ptr<stuDocBlock> {
   inline stuDocFigureBlock *asFigure();
   inline stuDocTableBlock *asTable();
   inline stuDocFormulaeBlock *asFormulae();
+
+  inline const stuDocTextBlock *asText() const;
+  inline const stuDocFigureBlock *asFigure() const;
+  inline const stuDocTableBlock *asTable() const;
+  inline const stuDocFormulaeBlock *asFormulae() const;
 };
 
 typedef std::vector<clsDocBlockPtr> DocBlockPtrVector_t;
@@ -295,6 +347,8 @@ struct stuDocTextBlock : public stuDocBlock {
   enuDocTextBlockAssociation Association;
   clsDocBlockPtr AssociatedBlock;
   stuDocTextBlock() : stuDocBlock(enuDocBlockType::Text) {}
+  void mergeWith_(const stuDocTextBlock &_otherBlock);
+  void mergeWith_(const clsDocBlockPtr &_otherBlock);
 };
 
 struct stuDocFigureBlock : public stuDocBlock {
@@ -330,6 +384,19 @@ inline stuDocTableBlock *clsDocBlockPtr::asTable() {
 }
 inline stuDocFormulaeBlock *clsDocBlockPtr::asFormulae() {
   return static_cast<stuDocFormulaeBlock *>(this->get());
+}
+
+inline const stuDocTextBlock *clsDocBlockPtr::asText() const {
+  return static_cast<stuDocTextBlock const *>(this->get());
+}
+inline const stuDocFigureBlock *clsDocBlockPtr::asFigure() const {
+  return static_cast<stuDocFigureBlock const *>(this->get());
+}
+inline const stuDocTableBlock *clsDocBlockPtr::asTable() const {
+  return static_cast<stuDocTableBlock const *>(this->get());
+}
+inline const stuDocFormulaeBlock *clsDocBlockPtr::asFormulae() const {
+  return static_cast<stuDocFormulaeBlock const *>(this->get());
 }
 
 }  // namespace DLA

@@ -1,17 +1,167 @@
 #ifndef __TARGOMAN_PDFLA_DEBUG__
 #define __TARGOMAN_PDFLA_DEBUG__
 
+#include <iostream>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "pdfla.h"
+#include "type_traits.hpp"
 
 namespace Targoman {
 namespace PDFLA {
 
+constexpr float DEBUG_UPSCALE_FACTOR = 4.f;
+
 typedef std::tuple<std::vector<uint8_t>, Targoman::DLA::stuSize> RawImageData_t;
+
+template <typename T>
+using RemoveConstRef_t = std::remove_const_t<std::remove_reference_t<T>>;
+
+template <typename T, typename = void>
+struct stuBoundingBoxPtrHelper {};
+
+template <typename T>
+struct stuBoundingBoxPtrHelper<T*, void> {
+  static void appendTo(const T*& _item,
+                       std::vector<const Targoman::DLA::stuBoundingBox*>& v) {
+    if (_item != nullptr)
+      stuBoundingBoxPtrHelper<RemoveConstRef_t<T>>::appendTo(*_item, v);
+  }
+};
+
+template <typename T>
+struct stuBoundingBoxPtrHelper<std::shared_ptr<T>, void> {
+  static void appendTo(const std::shared_ptr<T>& _item,
+                       std::vector<const Targoman::DLA::stuBoundingBox*>& v) {
+    if (_item.get() != nullptr)
+      stuBoundingBoxPtrHelper<RemoveConstRef_t<T>>::appendTo(*_item, v);
+  }
+};
+
+template <typename T>
+struct stuBoundingBoxPtrHelper<
+    T,
+    std::enable_if_t<
+        std::is_same_v<std::shared_ptr<typename T::element_type>, T> == false &&
+        std::is_base_of_v<std::shared_ptr<typename T::element_type>, T>>> {
+  static void appendTo(const T& _item,
+                       std::vector<const Targoman::DLA::stuBoundingBox*>& v) {
+    if (_item.get() != nullptr)
+      stuBoundingBoxPtrHelper<typename T::element_type>::appendTo(*_item, v);
+  }
+};
+
+template <typename T, typename = void>
+struct stuHasBoundingBoxMember : public std::false_type {};
+
+template <typename T>
+struct stuHasBoundingBoxMember<T, decltype((void)&T::BoundingBox)>
+    : public std::true_type {};
+
+template <typename T>
+constexpr bool HasBoundingBoxMember = stuHasBoundingBoxMember<T>::value;
+
+template <>
+struct stuBoundingBoxPtrHelper<Targoman::DLA::stuBoundingBox, void> {
+  static void appendTo(const Targoman::DLA::stuBoundingBox& _item,
+                       std::vector<const Targoman::DLA::stuBoundingBox*>& v) {
+    v.push_back(&_item);
+  }
+};
+
+template <typename T>
+struct stuBoundingBoxPtrHelper<T, std::enable_if_t<HasBoundingBoxMember<T>>> {
+  static void appendTo(const T& _item,
+                       std::vector<const Targoman::DLA::stuBoundingBox*>& v) {
+    stuBoundingBoxPtrHelper<Targoman::DLA::stuBoundingBox>::appendTo(
+        _item.BoundingBox, v);
+  }
+};
+
+template <typename T>
+struct stuBoundingBoxPtrHelper<
+    T, std::enable_if_t<Targoman::Common::IsContainer<T>>> {
+  static void appendTo(const T& _container,
+                       std::vector<const Targoman::DLA::stuBoundingBox*>& v) {
+    using U = RemoveConstRef_t<decltype(*_container.begin())>;
+    for (const auto& Item : _container)
+      stuBoundingBoxPtrHelper<U>::appendTo(Item, v);
+  }
+};
+
+struct stuPdfLaDebugImageData;
+class clsPdfLaDebugImage {
+ private:
+  std::shared_ptr<stuPdfLaDebugImageData> Data;
+
+ public:
+  clsPdfLaDebugImage(const RawImageData_t& _imageData,
+                     const std::string& _debugOutputPath,
+                     const std::string& _basename, size_t _pageIndex);
+
+  clsPdfLaDebugImage();
+
+  template <typename... Ts>
+  clsPdfLaDebugImage& add(const Ts&... _items) {
+    std::vector<const Targoman::DLA::stuBoundingBox*> BoundingBoxes;
+    auto finalize = [this, &BoundingBoxes]() mutable {
+      if (BoundingBoxes.size() == 0) return;
+      this->add(BoundingBoxes);
+      BoundingBoxes.clear();
+    };
+    auto consume = [this, &BoundingBoxes, &finalize](auto& _item) mutable {
+      using U = RemoveConstRef_t<decltype(_item)>;
+      if constexpr (Targoman::Common::IsContainer<U>) {
+        finalize();
+        stuBoundingBoxPtrHelper<U>::appendTo(_item, BoundingBoxes);
+        finalize();
+      } else {
+        stuBoundingBoxPtrHelper<U>::appendTo(_item, BoundingBoxes);
+      }
+    };
+    (..., (consume(_items)));
+    finalize();
+    return *this;
+  }
+
+  template <typename... Ts>
+  clsPdfLaDebugImage& add(const std::initializer_list<Ts>&... _items) {
+    std::vector<const Targoman::DLA::stuBoundingBox*> BoundingBoxes;
+    auto finalize = [this, &BoundingBoxes]() mutable {
+      if (BoundingBoxes.size() == 0) return;
+      this->add(BoundingBoxes);
+      BoundingBoxes.clear();
+    };
+    auto consume = [this, &BoundingBoxes,
+                    &finalize](const auto& _items) mutable {
+      using U = RemoveConstRef_t<decltype(*_items.begin())>;
+      if constexpr (Targoman::Common::IsContainer<U>)
+        for (const auto& Item : _items) {
+          finalize();
+          stuBoundingBoxPtrHelper<U>::appendTo(Item, BoundingBoxes);
+          finalize();
+        }
+      else {
+        finalize();
+        for (const auto& Item : _items) {
+          stuBoundingBoxPtrHelper<U>::appendTo(Item, BoundingBoxes);
+        }
+        finalize();
+      }
+    };
+    (..., (consume(_items)));
+    return *this;
+  }
+
+  clsPdfLaDebugImage& add(
+      const std::vector<const Targoman::DLA::stuBoundingBox*>& _boundingBoxes);
+
+  clsPdfLaDebugImage& show(const std::string& _tag);
+  clsPdfLaDebugImage& save(const std::string& _tag);
+};
 
 struct stuPdfLaDebugData;
 class clsPdfLaDebug {
@@ -64,61 +214,17 @@ class clsPdfLaDebug {
     this->setCurrentPageIndex(static_cast<const void*>(_object), _pageIndex);
   }
 
-  void saveDebugImage(
-      const void* _object, const std::string& _tag,
-      const std::vector<std::vector<const Targoman::DLA::stuBoundingBox*>>&
-          _boundingBoxes,
-      float _scale);
-
-  void showDebugImage(
-      const void* _object, const std::string& _tag,
-      const std::vector<std::vector<const Targoman::DLA::stuBoundingBox*>>&
-          _boundingBoxes,
-      float _scale);
-
   template <typename T>
-  std::vector<const Targoman::DLA::stuBoundingBox*>
-  getVectorOfPointersToBoundingBoxes(const T& _container) {
-    std::vector<const Targoman::DLA::stuBoundingBox*> Result;
-    for (const auto& Item : _container) Result.push_back(&(Item->BoundingBox));
-    return Result;
-  }
-
-  std::vector<const Targoman::DLA::stuBoundingBox*>
-  getVectorOfPointersToBoundingBoxes(
-      const Targoman::DLA::BoundingBoxPtrVector_t& _container) {
-    std::vector<const Targoman::DLA::stuBoundingBox*> Result;
-    for (const auto& Item : _container) Result.push_back(Item.get());
-    return Result;
-  }
-
-  template <typename T, typename... Ts>
-  void saveDebugImage(T* _object, const std::string& _tag, float _scale,
-                      const Ts&... _boundingBoxes) {
-    std::vector<std::vector<const Targoman::DLA::stuBoundingBox*>>
-        BoundingBoxes;
-    (..., (BoundingBoxes.push_back(
-              this->getVectorOfPointersToBoundingBoxes(_boundingBoxes))));
-    this->saveDebugImage(static_cast<const void*>(_object), _tag, BoundingBoxes,
-                         _scale);
-  }
-
-  template <typename T, typename... Ts>
-  void showDebugImage(T* _object, const std::string& _tag, float _scale,
-                      const Ts&... _boundingBoxes) {
-    std::vector<std::vector<const Targoman::DLA::stuBoundingBox*>>
-        BoundingBoxes;
-    (..., (BoundingBoxes.push_back(
-              this->getVectorOfPointersToBoundingBoxes(_boundingBoxes))));
-    this->showDebugImage(static_cast<const void*>(_object), _tag, BoundingBoxes,
-                         _scale);
+  clsPdfLaDebugImage createImage(T* _object) {
+    return this->createImage(static_cast<const void*>(_object));
   }
 
  public:
   void setDebugOutputPath(const std::string& _debugOutputPath);
-
-  friend class clsPdfLaDebugImageHelper;
 };
+
+template <>
+clsPdfLaDebugImage clsPdfLaDebug::createImage(const void* _object);
 
 }  // namespace PDFLA
 }  // namespace Targoman
