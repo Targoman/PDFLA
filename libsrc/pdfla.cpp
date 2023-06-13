@@ -421,10 +421,16 @@ clsPdfLaInternals::findPageLinesAndFigures(
 
       auto Union = Line->BoundingBox.unionWith(Item->BoundingBox);
       bool OverlapsWithCover = false;
+
+      // TODO: Deal with this magic constant
       for (const auto &CoverItem : _whitespaceCover)
-        if (CoverItem->hasIntersectionWith(Union) &&
-            CoverItem->verticalOverlap(Union) > 3) {
+        if ((CoverItem->horizontalOverlap(Item->BoundingBox) > 1 ||
+             CoverItem->verticalOverlap(Item->BoundingBox) > 1) &&
+            CoverItem->verticalOverlap(Line->BoundingBox) > 3 &&
+            CoverItem->hasIntersectionWith(Union)) {
           OverlapsWithCover = true;
+          clsPdfLaDebug::instance().createImage(this).add(Line).add(Item).add(CoverItem).show(
+              "WhiteCoverOverlap");
           break;
         }
       if (OverlapsWithCover) {
@@ -476,6 +482,11 @@ clsPdfLaInternals::findPageLinesAndFigures(
                 return ResultLines[a]->BoundingBox.left() <
                        ResultLines[b]->BoundingBox.left();
               });
+    // clsPdfLaDebug::instance()
+    //     .createImage(this)
+    //     .add(map(IndexesOfSegmentsOfSameLine,
+    //              [&](size_t i) { return ResultLines[i]; }))
+    //     .show("MergeLineSegments");
     size_t ProxySegmentIndex = static_cast<size_t>(-1);
     DocLinePtr_t Merged;
     for (size_t i : IndexesOfSegmentsOfSameLine) {
@@ -563,18 +574,18 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
     bool Consumed = false;
     for (auto &Block : Result) {
       if (Block->BoundingBox.contains(Line->BoundingBox)) {
-
-        auto Problems =
-            filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
-        return b->hasIntersectionWith(Block->BoundingBox.unionWith(Line->BoundingBox));
-            });
-        if (!Problems.empty())
-          clsPdfLaDebug::instance()
-              .createImage(this)
-              .add(Block)
-              .add(Line)
-              .add(Problems)
-              .show("Consume");
+        // auto Problems =
+        //     filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
+        // return
+        // b->hasIntersectionWith(Block->BoundingBox.unionWith(Line->BoundingBox));
+        //     });
+        // if (!Problems.empty())
+        //   clsPdfLaDebug::instance()
+        //       .createImage(this)
+        //       .add(Block)
+        //       .add(Line)
+        //       .add(Problems)
+        //       .show("Consume");
 
         Block->BoundingBox.unionWith_(Line->BoundingBox);
         Block.asText()->Lines.push_back(Line);
@@ -631,26 +642,32 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
             Union.hasIntersectionWith(PossibleBlocker) &&
             any(LinesOnSameVerticalStripe,
                 [&](const DocLinePtr_t &_line) {
-                  return _line->BoundingBox.right() < PossibleBlocker->left() + MIN_ITEM_SIZE;
+                  return _line->BoundingBox.right() <
+                         PossibleBlocker->left() + MIN_ITEM_SIZE;
                 }) &&
             any(LinesOnSameVerticalStripe, [&](const DocLinePtr_t &_line) {
-              return _line->BoundingBox.left() > PossibleBlocker->right() - MIN_ITEM_SIZE;
+              return _line->BoundingBox.left() >
+                     PossibleBlocker->right() - MIN_ITEM_SIZE;
             })) {
           Blocked = true;
           break;
         }
       if (Blocked) break;
-      auto Problems = filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
-        return b->hasIntersectionWith(Block->BoundingBox.unionWith(Line->BoundingBox));
-      });
-      if (!Problems.empty())
-        clsPdfLaDebug::instance()
-            .createImage(this)
-            .add(Block)
-            .add(Line)
-            .add(LinesOnSameVerticalStripe)
-            .add(Problems)
-            .show("AddToBlock");
+
+      // auto Problems = filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b)
+      // {
+      //   return
+      //   b->hasIntersectionWith(Block->BoundingBox.unionWith(Line->BoundingBox));
+      // });
+      // if (!Problems.empty())
+      //   clsPdfLaDebug::instance()
+      //       .createImage(this)
+      //       .add(Block)
+      //       .add(Line)
+      //       .add(LinesOnSameVerticalStripe)
+      //       .add(Problems)
+      //       .show("AddToBlock");
+
       Block->BoundingBox.unionWith_(Line->BoundingBox);
       Block.asText()->Lines.push_back(Line);
       UsedLines.insert(Line);
