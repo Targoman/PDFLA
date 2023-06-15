@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <cmath>
 
 #include "type_traits.hpp"
 
@@ -331,7 +332,7 @@ struct stuDocLine;
 typedef std::shared_ptr<stuDocLine> DocLinePtr_t;
 typedef std::vector<DocLinePtr_t> DocLinePtrVector_t;
 struct stuDocLine : public stuBoxBoundedItem {
-  float Baseline;
+  float Baseline = std::nanf("");
   int32_t ID;
   enuListType ListType;
   float TextLeft;
@@ -339,6 +340,14 @@ struct stuDocLine : public stuBoxBoundedItem {
 
   void mergeWith_(const stuDocLine &_otherLine);
   void mergeWith_(const DocLinePtr_t &_otherLine);
+
+  void computeBaseline();
+
+  float baselineDifference(const stuDocLine& _otherLine);
+  float baselineDifference(const DocLinePtr_t& _otherLine);
+
+  float overlap(const stuDocLine& _otherLine) const;
+  float overlap(const DocLinePtr_t& _otherLine) const;
 };
 
 enum class enuDocTextBlockAssociation { None, IsCaptionOf, IsInsideOf };

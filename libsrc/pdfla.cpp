@@ -152,8 +152,18 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
       });
 
       auto [Score, Cover, Obstacles] = std::move(Candidates[ArgMax]);
-      if (Obstacles.empty() || Score < 1) return Cover;
-      auto Union = stuBoundingBox(*Obstacles.front());
+      Candidates.erase(Candidates.begin() + ArgMax);
+
+      if (Obstacles.empty() || Score < 1) {
+        clsPdfLaDebug::instance()
+            .createImage(this)
+            .add(Obstacles)
+            .add(Cover)
+            .show("GWC");
+        return Cover;
+      }
+      auto Union = stuBoundingBox(_bounds->right(), _bounds->bottom(),
+                                  _bounds->left(), _bounds->top());
       for (const auto &Obstacle : Obstacles) Union.unionWith_(Obstacle);
       auto Center = Union.center();
       auto Pivot =
@@ -176,7 +186,6 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
               return Item->hasIntersectionWith(NewCandidate);
             })));
       }
-      Candidates.erase(Candidates.begin() + ArgMax);
     }
   };
   auto Obstacles = _obstacles;
@@ -429,8 +438,12 @@ clsPdfLaInternals::findPageLinesAndFigures(
             CoverItem->verticalOverlap(Line->BoundingBox) > 3 &&
             CoverItem->hasIntersectionWith(Union)) {
           OverlapsWithCover = true;
-          clsPdfLaDebug::instance().createImage(this).add(Line).add(Item).add(CoverItem).show(
-              "WhiteCoverOverlap");
+          // clsPdfLaDebug::instance()
+          //     .createImage(this)
+          //     .add(Line)
+          //     .add(Item)
+          //     .add(CoverItem)
+          //     .show("WhiteCoverOverlap");
           break;
         }
       if (OverlapsWithCover) {
@@ -526,6 +539,7 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
   std::map<DocLinePtr_t, DocLinePtr_t> TopNeighbours;
   std::map<DocLinePtr_t, DocLinePtr_t> BottomNeighbours;
   for (auto &Line : SortedLines) {
+    Line->computeBaseline();
     auto &BottomNeighbour = BottomNeighbours[Line];
     float BottomNeighbourVerticalOverlap = std::numeric_limits<float>::min();
     float BottomNeighbourHorizontalOverlap = std::numeric_limits<float>::min();
@@ -617,7 +631,17 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
     UsedLines.insert(Line);
 
     while (BottomNeighbours[Line].get() != nullptr) {
+      auto PrevLine = Line;
       Line = BottomNeighbours[Line];
+      auto NextLine = BottomNeighbours[Line];
+      if (NextLine.get() != nullptr) {
+        float V0 = PrevLine->BoundingBox.verticalOverlap(Line->BoundingBox);
+        float V1 = NextLine->BoundingBox.verticalOverlap(Line->BoundingBox);
+        if (V0 < V1 - 2.f && V0 < -std::min({PrevLine->BoundingBox.height(),
+                                             Line->BoundingBox.height(),
+                                             NextLine->BoundingBox.height()}))
+          break;
+      }
       auto Union = Block->BoundingBox.unionWith(Line->BoundingBox);
       bool Blocked = false;
       for (const auto &PossibleBlocker : _pageFigures)
@@ -718,11 +742,10 @@ std::vector<uint8_t> clsPdfLaInternals::renderPageImage(
 }
 
 DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
-  clsPdfLaDebug::instance().setCurrentPageIndex(this, _pageIndex);
-
   auto PageSize = this->getPageSize(_pageIndex);
 
-  if (clsPdfLaDebug::instance().isObjectRegister(this)) {
+  if (clsPdfLaDebug::instance().isObjectRegistered(this)) {
+    clsPdfLaDebug::instance().setCurrentPageIndex(this, _pageIndex);
     auto [PageImage, PageImageSize] =
         clsPdfLaDebug::instance().getPageImage(this, _pageIndex);
 

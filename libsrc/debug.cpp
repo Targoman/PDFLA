@@ -38,7 +38,7 @@ void clsPdfLaDebug::unregisterObject(const void* _object) {
 }
 
 template <>
-bool clsPdfLaDebug::isObjectRegister(const void* _object) {
+bool clsPdfLaDebug::isObjectRegistered(const void* _object) {
   return this->DebugData.find(_object) != this->DebugData.end();
 }
 

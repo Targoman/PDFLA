@@ -5,8 +5,12 @@
 #include <set>
 #include <sstream>
 
+#include "algorithm.hpp"
+
 namespace Targoman {
 namespace DLA {
+
+using namespace Targoman::Common;
 
 constexpr float MAX_RULER_THIN_SIZE = 4.f;
 constexpr float MIN_RULER_THICK_SIZE = 8.f;
@@ -176,6 +180,43 @@ void stuDocLine::mergeWith_(const stuDocLine &_otherLine) {
 
 void stuDocLine::mergeWith_(const DocLinePtr_t &_otherLine) {
   return this->mergeWith_(*_otherLine);
+}
+
+void stuDocLine::computeBaseline() {
+  if (std::isnan(this->Baseline)) {
+    auto ItemBaselines =
+        map(this->Items, [](const DocItemPtr_t &e) { return e->Baseline; });
+    auto [Mean, Std] = meanAndStd(ItemBaselines);
+    ItemBaselines.erase(
+        std::remove_if(ItemBaselines.begin(), ItemBaselines.end(),
+                       [&Mean = Mean, &Std = Std](float v) {
+                         return std::abs(v - Mean) <= Std;
+                       }),
+        ItemBaselines.end());
+    this->Baseline = mean(ItemBaselines);
+  }
+}
+
+float stuDocLine::baselineDifference(const stuDocLine &_otherLine) {
+  return this->Baseline - _otherLine.Baseline;
+}
+
+float stuDocLine::baselineDifference(const DocLinePtr_t &_otherLine) {
+  return this->baselineDifference(*_otherLine);
+}
+
+float stuDocLine::overlap(const stuDocLine &_otherLine) const {
+  float Y0 = std::max(
+      min(this->Items, [](const DocItemPtr_t &e) { return e->Ascent; }),
+      min(_otherLine.Items, [](const DocItemPtr_t &e) { return e->Ascent; }));
+  float Y1 = std::min(
+      max(this->Items, [](const DocItemPtr_t &e) { return e->Descent; }),
+      max(_otherLine.Items, [](const DocItemPtr_t &e) { return e->Descent; }));
+  return Y1 - Y0;
+}
+
+float stuDocLine::overlap(const DocLinePtr_t &_otherLine) const {
+  return this->overlap(*_otherLine);
 }
 
 void stuDocTextBlock::mergeWith_(const stuDocTextBlock &_otherBlock) {

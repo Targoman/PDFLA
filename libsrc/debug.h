@@ -187,13 +187,15 @@ class clsPdfLaDebug {
   }
 
   template <typename T>
-  bool isObjectRegister(T* _object) {
-    return this->isObjectRegister(static_cast<const void*>(_object));
+  bool isObjectRegistered(T* _object) {
+    return this->isObjectRegistered<const void>(
+        static_cast<const void*>(_object));
   }
 
   template <typename T>
   bool pageImageExists(T* _object, size_t _pageIndex) {
-    return this->pageImageExists(static_cast<const void*>(_object), _pageIndex);
+    return this->pageImageExists<const void>(static_cast<const void*>(_object),
+                                             _pageIndex);
   }
 
   template <typename T>
@@ -225,6 +227,31 @@ class clsPdfLaDebug {
 
 template <>
 clsPdfLaDebugImage clsPdfLaDebug::createImage(const void* _object);
+
+template <>
+void clsPdfLaDebug::registerObject(const void* _object,
+                                   const std::string& _basename);
+
+template <>
+void clsPdfLaDebug::unregisterObject(const void* _object);
+
+template <>
+bool clsPdfLaDebug::isObjectRegistered(const void* _object);
+
+template <>
+bool clsPdfLaDebug::pageImageExists(const void* _object, size_t _pageIndex);
+
+template <>
+void clsPdfLaDebug::registerPageImage(const void* _object, size_t _pageIndex,
+                                      const std::vector<uint8_t>& _data,
+                                      const Targoman::DLA::stuSize& _size);
+
+template <>
+const RawImageData_t& clsPdfLaDebug::getPageImage(const void* _object,
+                                                  size_t _pageIndex);
+
+template <>
+void clsPdfLaDebug::setCurrentPageIndex(const void* _object, size_t _pageIndex);
 
 }  // namespace PDFLA
 }  // namespace Targoman

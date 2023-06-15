@@ -120,9 +120,9 @@ auto max(const T0 &v, Functor_t f) {
   static_assert(ContainerTraits_t::IsContainer,
                 "`max` only works on containers");
   using T1 = typename ContainerTraits_t::ElementBareType_t;
-  using T2 = BareType_t<decltype(std::declval<Functor_t>()(std::declval<T1>()))>;
-  if(v.empty())
-    return T2();
+  using T2 =
+      BareType_t<decltype(std::declval<Functor_t>()(std::declval<T1>()))>;
+  if (v.empty()) return T2();
   return f(*std::max_element(
       v.begin(), v.end(),
       [&f](const T1 &a, const T1 &b) { return f(a) < f(b); }));
@@ -134,9 +134,9 @@ auto min(const T0 &v, Functor_t f) {
   static_assert(ContainerTraits_t::IsContainer,
                 "`min` only works on containers");
   using T1 = typename ContainerTraits_t::ElementBareType_t;
-  using T2 = BareType_t<decltype(std::declval<Functor_t>()(std::declval<T1>()))>;
-  if(v.empty())
-    return T2();
+  using T2 =
+      BareType_t<decltype(std::declval<Functor_t>()(std::declval<T1>()))>;
+  if (v.empty()) return T2();
   return f(*std::min_element(
       v.begin(), v.end(),
       [&f](const T1 &a, const T1 &b) { return f(a) < f(b); }));
@@ -155,32 +155,56 @@ auto mean(const T0 &v, Functor_t f) {
          static_cast<T1>(v.size());
 }
 
+template <typename T>
+auto mean(const T &v) {
+  return mean(v, [](auto e) { return e; });
+}
+
 template <typename T0, typename Functor_t>
-auto var(const T0 &v, Functor_t f) {
+auto meanAndVar(const T0 &v, Functor_t f) {
   using ContainerTraits_t = stuContainerTypeTraits<T0>;
   static_assert(ContainerTraits_t::IsContainer,
                 "`var` only works on containers");
   using T1 = BareType_t<decltype(std::declval<Functor_t>()(
       std::declval<typename ContainerTraits_t::ElementType_t>()))>;
-  if (v.empty()) return static_cast<T1>(0);
+  if (v.empty()) return std::make_tuple<T1, T1>(0, 0);
   T1 Mean = mean(v, f);
-  return std::accumulate(
-             v.begin(), v.end(), static_cast<T1>(0),
-             [&f, &Mean](auto sum, auto e) { return sum + (f(e) - Mean); }) /
-         static_cast<T1>(v.size());
+  return std::make_tuple<T1, T1>(
+      static_cast<T1>(Mean),
+      std::accumulate(
+          v.begin(), v.end(), static_cast<T1>(0),
+          [&f, &Mean](auto sum, auto e) { return sum + (f(e) - Mean); }) /
+          static_cast<T1>(v.size()));
 }
 
 template <typename T0, typename Functor_t>
-auto std(const T0 &v, Functor_t f) {
+auto var(const T0 &v, Functor_t f) {
+  auto [Mean, Var] = meanAndVar(v, f);
+  return Var;
+}
+
+template <typename T0, typename Functor_t>
+auto meanAndStd(const T0 &v, Functor_t f) {
   using ContainerTraits_t = stuContainerTypeTraits<T0>;
   static_assert(ContainerTraits_t::IsContainer,
                 "`std` only works on containers");
   using T1 = BareType_t<decltype(std::declval<Functor_t>()(
       std::declval<typename ContainerTraits_t::ElementType_t>()))>;
-  if (v.empty()) return static_cast<T1>(0);
-  auto Var = var(v, f);
-  if (Var > std::numeric_limits<T1>::epsilon()) return sqrt(Var);
-  return 0;
+  auto [Mean, Var] = meanAndVar(v, f);
+  if (Var > std::numeric_limits<T1>::epsilon())
+    return std::make_pair<T1, T1>(static_cast<T1>(Mean), sqrt(Var));
+  return std::make_pair<T1, T1>(static_cast<T1>(Mean), 0);
+}
+
+template <typename T>
+auto meanAndStd(const T &v) {
+  return meanAndStd(v, [](auto e) { return e; });
+}
+
+template <typename T0, typename Functor_t>
+auto std(const T0 &v, Functor_t f) {
+  auto [Mean, Std] = meanAndStd(v, f);
+  return Std;
 }
 
 template <typename T0, typename T1>
@@ -226,6 +250,61 @@ bool none(const T0 &v, Functor_t f) {
   if (v.empty()) return false;
   return std::none_of(v.begin(), v.end(), f);
 }
+
+class clsOneDimensionalCover {
+ private:
+  std::vector<float> PositionVector;
+
+ public:
+  void appendBounds(float _p0, float _p1) {
+    if (this->PositionVector.empty()) {
+      this->PositionVector.push_back(_p0);
+      this->PositionVector.push_back(_p1);
+    } else {
+      size_t iP0 = this->PositionVector.size(), iP1 = 0;
+      for (size_t i = 0; i < this->PositionVector.size(); ++i)
+        if (this->PositionVector[i] >= _p0) {
+          iP0 = i;
+          break;
+        }
+      for (size_t i = this->PositionVector.size(); i > 0; --i)
+        if (_p1 >= this->PositionVector[i - 1]) {
+          iP1 = i;
+          break;
+        }
+      if (iP1 == 0 || iP0 == this->PositionVector.size()) {
+        this->PositionVector.push_back(_p0);
+        this->PositionVector.push_back(_p1);
+        if (iP1 == 0)
+          std::rotate(this->PositionVector.rbegin(),
+                      this->PositionVector.rbegin() + 2,
+                      this->PositionVector.rend());
+      } else {
+        if (iP1 <= iP0) {
+          if (iP0 % 2 == 0)
+            this->PositionVector.insert(this->PositionVector.begin() + iP0,
+                                        {_p0, _p1});
+        } else {
+          size_t I0 = iP0, I1 = iP1;
+          if (iP0 % 2 == 0) {
+            this->PositionVector[iP0] = _p0;
+            ++I0;
+          }
+          if (iP1 % 2 == 0) {
+            this->PositionVector[iP1 - 1] = _p1;
+            --I1;
+          }
+          if (I1 > I0)
+            this->PositionVector.erase(this->PositionVector.begin() + I0,
+                                       this->PositionVector.begin() + I1);
+          if (this->PositionVector.size() % 2 != 0) {
+            std::cout << "THIS MUST NEVER HAPPEN" << std::endl;
+          }
+        }
+      }
+    }
+  }
+};
 
 }  // namespace Common
 }  // namespace Targoman
