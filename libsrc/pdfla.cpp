@@ -125,75 +125,119 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
   constexpr float MIN_COVER_AREA = 2048.f;
   constexpr size_t MAX_COVER_NUMBER_OF_ITEMS = 30;
 
-  BoundingBoxPtrVector_t Result;
   auto candidateIsAcceptable = [&](const BoundingBoxPtr_t &_bounds) {
     return _bounds->width() >= MIN_COVER_SIZE &&
            _bounds->height() >= MIN_COVER_SIZE &&
+           _bounds->height() >= _bounds->width() &&
            _bounds->width() + _bounds->height() >= MIN_COVER_PERIMETER &&
            _bounds->area() >= MIN_COVER_AREA;
   };
-  auto calculateCandidateScore = [&](const BoundingBoxPtr_t &_candidate) {
-    return _candidate->height() + 0.1f * _candidate->width();
-  };
-  auto findNextLargetsCover =
-      [&](const BoundingBoxPtr_t &_bounds,
-          const BoundingBoxPtrVector_t &_obstacles) -> BoundingBoxPtr_t {
-    typedef std::tuple<float, BoundingBoxPtr_t, BoundingBoxPtrVector_t>
-        Candidate_t;
-    std::vector<Candidate_t> Candidates{
-        std::make_tuple(calculateCandidateScore(_bounds), _bounds, _obstacles)};
-    while (true) {
-      if (Candidates.empty()) return std::make_shared<stuBoundingBox>();
 
-      auto ArgMax = argmax(Candidates, [&](const Candidate_t &_candidate) {
-        return candidateIsAcceptable(std::get<1>(_candidate))
-                   ? std::get<0>(_candidate)
-                   : -1;
-      });
+  BoundingBoxPtrVector_t Result;
+  if (true) {
+    BoundingBoxPtrVector_t L2R, T2B;
 
-      auto [Score, Cover, Obstacles] = std::move(Candidates[ArgMax]);
-      Candidates.erase(Candidates.begin() + ArgMax);
+    std::vector<float> Xs, Ys;
+    Xs.push_back(_bounds->right());
+    Ys.push_back(_bounds->bottom());
+    for (const auto &Obstacle : _obstacles) {
+      Xs.insert(Xs.end(), {Obstacle->left(), Obstacle->right()});
+      Ys.insert(Ys.end(), {Obstacle->top(), Obstacle->bottom()});
+    }
+    std::sort(Xs.begin(), Xs.end());
+    std::sort(Ys.begin(), Ys.end());
 
-      if (Obstacles.empty() || Score < 1) {
-        clsPdfLaDebug::instance()
-            .createImage(this)
-            .add(Obstacles)
-            .add(Cover)
-            .show("GWC");
-        return Cover;
+    auto filterPositions = [](std::vector<float> &_positions) {
+      std::vector<float> Filtered;
+      for (size_t i = 1; i < _positions.size(); ++i) {
+        if (std::abs(_positions[i] - _positions[i - 1]) > MIN_COVER_SIZE) {
+          if (Filtered.empty() || Filtered.back() != _positions[i - 1])
+            Filtered.push_back(_positions[i - 1]);
+          Filtered.push_back(_positions[i]);
+        }
       }
-      auto Union = stuBoundingBox(_bounds->right(), _bounds->bottom(),
-                                  _bounds->left(), _bounds->top());
-      for (const auto &Obstacle : Obstacles) Union.unionWith_(Obstacle);
-      auto Center = Union.center();
-      auto Pivot =
-          minElement(Obstacles, [&Center](const BoundingBoxPtr_t &_obstacle) {
-            return -_obstacle->area();
-          });
-      for (auto &NewCandidate :
-           {std::make_shared<stuBoundingBox>(Pivot->right(), Cover->top(),
-                                             Cover->right(), Cover->bottom()),
-            std::make_shared<stuBoundingBox>(Cover->left(), Cover->top(),
-                                             Pivot->left(), Cover->bottom()),
-            std::make_shared<stuBoundingBox>(Cover->left(), Pivot->bottom(),
-                                             Cover->right(), Cover->bottom()),
-            std::make_shared<stuBoundingBox>(Cover->left(), Cover->top(),
-                                             Cover->right(), Pivot->top())}) {
-        if (!candidateIsAcceptable(NewCandidate)) continue;
-        Candidates.push_back(std::make_tuple(
-            calculateCandidateScore(NewCandidate), NewCandidate,
-            filter(Obstacles, [&NewCandidate](const BoundingBoxPtr_t &Item) {
-              return Item->hasIntersectionWith(NewCandidate);
-            })));
+      _positions = std::move(Filtered);
+    };
+
+    filterPositions(Xs);
+    filterPositions(Ys);
+
+    if (std::abs(Xs.front() - _bounds->left()) < MIN_COVER_SIZE)
+      Xs.front() = _bounds->left();
+    else
+      Xs.insert(Xs.begin(), _bounds->left());
+    if (std::abs(Ys.front() - _bounds->top()) < MIN_COVER_SIZE)
+      Ys.front() = _bounds->top();
+    else
+      Ys.insert(Ys.begin(), _bounds->top());
+
+    size_t NX = Xs.size(), NY = Ys.size();
+
+    L2R.resize(NX * NY);
+    T2B.resize(NX * NY);
+
+    for (size_t iY = 1; iY < Ys.size(); ++iY) {
+      for (size_t iX = 1; iX < Xs.size(); ++iX) {
+        auto NewItem = std::make_shared<stuBoundingBox>(
+            Xs[iX - 1] + 1, Ys[iY - 1] + 1, Xs[iX] - 1, Ys[iY] - 1);
+        for (const auto &Obstacle : _obstacles)
+          if (NewItem.get() != nullptr &&
+              NewItem->hasIntersectionWith(Obstacle)) {
+            NewItem.reset();
+            break;
+          }
+        if (NewItem.get() != nullptr) {
+          L2R[(iX - 1) + (iY - 1) * NX] = NewItem;
+          T2B[(iY - 1) + (iX - 1) * NY] = NewItem;
+        }
       }
     }
-  };
-  auto Obstacles = _obstacles;
-  for (size_t i = 0; i < MAX_COVER_NUMBER_OF_ITEMS; ++i) {
-    auto NextCover = findNextLargetsCover(_bounds, Obstacles);
-    if (!candidateIsAcceptable(NextCover)) break;
-    Result.push_back(NextCover);
-    Obstacles.push_back(NextCover);
+
+    for (size_t iX = 1; iX < NX; ++iX) {
+      size_t Offset = (iX - 1) * NY;
+      size_t i = 0;
+      for (size_t j = 1; j < NY; ++j) {
+        if (T2B[Offset + i].get() == nullptr) {
+          i = j;
+          continue;
+        }
+        if (T2B[Offset + j].get() == nullptr) {
+          i = j;
+          continue;
+        }
+        T2B[Offset + i]->unionWith_(T2B[Offset + j]);
+        T2B[Offset + j].reset();
+        L2R[(iX - 1) + j * NX].reset();
+      }
+    }
+
+    for (size_t iY = 1; iY < NY; ++iY) {
+      size_t Offset = (iY - 1) * NX;
+      size_t i = 0;
+      for (size_t j = 1; j < NX; ++j) {
+        if (L2R[Offset + i].get() == nullptr) {
+          i = j;
+          continue;
+        }
+        if (L2R[Offset + j].get() == nullptr) {
+          i = j;
+          continue;
+        }
+        if (std::abs(L2R[Offset + i]->height() - L2R[Offset + j]->height()) >
+                MIN_ITEM_SIZE ||
+            L2R[Offset + i]->verticalOverlap(L2R[Offset + j]) <
+                L2R[Offset + i]->height() - 1) {
+          i = j;
+          continue;
+        }
+        L2R[Offset + i]->unionWith_(L2R[Offset + j]);
+        L2R[Offset + j].reset();
+      }
+    }
+
+    Result = std::move(L2R);
+    filterNullPtrs_(Result);
+    filter_(Result, candidateIsAcceptable);
   }
 
   return Result;
@@ -588,18 +632,18 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
     bool Consumed = false;
     for (auto &Block : Result) {
       if (Block->BoundingBox.contains(Line->BoundingBox)) {
-        // auto Problems =
-        //     filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
-        // return
-        // b->hasIntersectionWith(Block->BoundingBox.unionWith(Line->BoundingBox));
-        //     });
-        // if (!Problems.empty())
-        //   clsPdfLaDebug::instance()
-        //       .createImage(this)
-        //       .add(Block)
-        //       .add(Line)
-        //       .add(Problems)
-        //       .show("Consume");
+        auto Problems =
+            filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
+              return b->hasIntersectionWith(
+                  Block->BoundingBox.unionWith(Line->BoundingBox));
+            });
+        if (!Problems.empty())
+          clsPdfLaDebug::instance()
+              .createImage(this)
+              .add(Block)
+              .add(Line)
+              .add(Problems)
+              .show("Consume");
 
         Block->BoundingBox.unionWith_(Line->BoundingBox);
         Block.asText()->Lines.push_back(Line);
@@ -660,37 +704,37 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
             return c(l->BoundingBox, Union, Line->BoundingBox) ||
                    c(l->BoundingBox, Line->BoundingBox, Union);
           });
+      // TODO: Deal with this magic constant
       for (const auto &PossibleBlocker : _whitespaceCover)
-        if (PossibleBlocker->left() > Union.left() - MIN_ITEM_SIZE &&
-            PossibleBlocker->right() < Union.right() - MIN_ITEM_SIZE &&
+        if (PossibleBlocker->left() >
+                Union.left() - 2.f &&  // The blocker is not attached left
+            PossibleBlocker->right() <
+                Union.right() + 2.f &&  // The blocker is not attached right
             Union.hasIntersectionWith(PossibleBlocker) &&
             any(LinesOnSameVerticalStripe,
                 [&](const DocLinePtr_t &_line) {
-                  return _line->BoundingBox.right() <
-                         PossibleBlocker->left() + MIN_ITEM_SIZE;
+                  return _line->BoundingBox.left() <= PossibleBlocker->left();
                 }) &&
             any(LinesOnSameVerticalStripe, [&](const DocLinePtr_t &_line) {
-              return _line->BoundingBox.left() >
-                     PossibleBlocker->right() - MIN_ITEM_SIZE;
+              return _line->BoundingBox.right() >= PossibleBlocker->right();
             })) {
           Blocked = true;
           break;
         }
       if (Blocked) break;
 
-      // auto Problems = filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b)
-      // {
-      //   return
-      //   b->hasIntersectionWith(Block->BoundingBox.unionWith(Line->BoundingBox));
-      // });
-      // if (!Problems.empty())
-      //   clsPdfLaDebug::instance()
-      //       .createImage(this)
-      //       .add(Block)
-      //       .add(Line)
-      //       .add(LinesOnSameVerticalStripe)
-      //       .add(Problems)
-      //       .show("AddToBlock");
+      auto Problems = filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
+        return b->hasIntersectionWith(
+            Block->BoundingBox.unionWith(Line->BoundingBox));
+      });
+      if (!Problems.empty())
+        clsPdfLaDebug::instance()
+            .createImage(this)
+            .add(Block)
+            .add(Line)
+            .add(LinesOnSameVerticalStripe)
+            .add(Problems)
+            .show("AddToBlock");
 
       Block->BoundingBox.unionWith_(Line->BoundingBox);
       Block.asText()->Lines.push_back(Line);

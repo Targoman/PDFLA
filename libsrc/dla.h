@@ -12,7 +12,7 @@
 
 namespace Targoman {
 namespace DLA {
-constexpr float MIN_ITEM_SIZE = 0.1f;
+constexpr float MIN_ITEM_SIZE = 0.6f;
 
 struct stuPoint {
   float X, Y;

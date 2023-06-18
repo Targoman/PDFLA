@@ -251,61 +251,6 @@ bool none(const T0 &v, Functor_t f) {
   return std::none_of(v.begin(), v.end(), f);
 }
 
-class clsOneDimensionalCover {
- private:
-  std::vector<float> PositionVector;
-
- public:
-  void appendBounds(float _p0, float _p1) {
-    if (this->PositionVector.empty()) {
-      this->PositionVector.push_back(_p0);
-      this->PositionVector.push_back(_p1);
-    } else {
-      size_t iP0 = this->PositionVector.size(), iP1 = 0;
-      for (size_t i = 0; i < this->PositionVector.size(); ++i)
-        if (this->PositionVector[i] >= _p0) {
-          iP0 = i;
-          break;
-        }
-      for (size_t i = this->PositionVector.size(); i > 0; --i)
-        if (_p1 >= this->PositionVector[i - 1]) {
-          iP1 = i;
-          break;
-        }
-      if (iP1 == 0 || iP0 == this->PositionVector.size()) {
-        this->PositionVector.push_back(_p0);
-        this->PositionVector.push_back(_p1);
-        if (iP1 == 0)
-          std::rotate(this->PositionVector.rbegin(),
-                      this->PositionVector.rbegin() + 2,
-                      this->PositionVector.rend());
-      } else {
-        if (iP1 <= iP0) {
-          if (iP0 % 2 == 0)
-            this->PositionVector.insert(this->PositionVector.begin() + iP0,
-                                        {_p0, _p1});
-        } else {
-          size_t I0 = iP0, I1 = iP1;
-          if (iP0 % 2 == 0) {
-            this->PositionVector[iP0] = _p0;
-            ++I0;
-          }
-          if (iP1 % 2 == 0) {
-            this->PositionVector[iP1 - 1] = _p1;
-            --I1;
-          }
-          if (I1 > I0)
-            this->PositionVector.erase(this->PositionVector.begin() + I0,
-                                       this->PositionVector.begin() + I1);
-          if (this->PositionVector.size() % 2 != 0) {
-            std::cout << "THIS MUST NEVER HAPPEN" << std::endl;
-          }
-        }
-      }
-    }
-  }
-};
-
 }  // namespace Common
 }  // namespace Targoman
 
