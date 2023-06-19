@@ -464,10 +464,11 @@ clsPdfLaInternals::findPageLinesAndFigures(
 
     auto Line = std::make_shared<stuDocLine>();
     Line->BoundingBox = Item->BoundingBox;
-    ResultLines.push_back(Line);
-
     Line->Items.push_back(Item);
     UsedChars.insert(Item);
+
+    // clsPdfLaDebug::instance().createImage(this).add(ResultLines).add(Line).show("NewLine");
+    ResultLines.push_back(Line);
 
     while (RightNeighbourOf[Item].get() != nullptr) {
       Item = RightNeighbourOf[Item];
@@ -476,11 +477,10 @@ clsPdfLaInternals::findPageLinesAndFigures(
       bool OverlapsWithCover = false;
 
       // TODO: Deal with this magic constant
-      for (const auto &CoverItem : _whitespaceCover)
-        if ((CoverItem->horizontalOverlap(Item->BoundingBox) > 1 ||
-             CoverItem->verticalOverlap(Item->BoundingBox) > 1) &&
-            CoverItem->verticalOverlap(Line->BoundingBox) > 3 &&
-            CoverItem->hasIntersectionWith(Union)) {
+      for (const auto &CoverItem : _whitespaceCover) {
+        auto Intersection = CoverItem->intersectWith(Union);
+        if (Intersection.width() > 1.f &&
+            Intersection.height() > Union.height() - MIN_ITEM_SIZE) {
           OverlapsWithCover = true;
           // clsPdfLaDebug::instance()
           //     .createImage(this)
@@ -490,11 +490,26 @@ clsPdfLaInternals::findPageLinesAndFigures(
           //     .show("WhiteCoverOverlap");
           break;
         }
+      }
       if (OverlapsWithCover) {
         Line = std::make_shared<stuDocLine>();
         Line->BoundingBox = Item->BoundingBox;
+        // clsPdfLaDebug::instance().createImage(this).add(ResultLines).add(Line).show("NewLine");
         ResultLines.push_back(Line);
       } else {
+        // auto WholeBox = Line->BoundingBox.unionWith(Item->BoundingBox);
+        // auto Problems =
+        //     filter(_whitespaceCover, [&](const BoundingBoxPtr_t &e) {
+        //       return WholeBox.hasIntersectionWith(e);
+        //     });
+        // if (Problems.size())
+        //   clsPdfLaDebug::instance()
+        //       .createImage(this)
+        //       .add(Line)
+        //       .add(Item)
+        //       .add(Problems)
+        //       .save("UpdateLine")
+        //       .show("UpdateLine");
         Line->BoundingBox.unionWith_(Item->BoundingBox);
         Line->Items.push_back(Item);
       }
@@ -564,11 +579,11 @@ clsPdfLaInternals::findPageLinesAndFigures(
 
   filterNullPtrs_(ResultLines);
 
-  clsPdfLaDebug::instance()
-      .createImage(this)
-      .add(ResultLines)
-      .save("Lines")
-      .show("Lines");
+  // clsPdfLaDebug::instance()
+  //     .createImage(this)
+  //     .add(ResultLines)
+  //     .save("Lines")
+  //     .show("Lines");
 
   return std::make_tuple(ResultLines, ResultFigures);
 }
@@ -632,18 +647,18 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
     bool Consumed = false;
     for (auto &Block : Result) {
       if (Block->BoundingBox.contains(Line->BoundingBox)) {
-        auto Problems =
-            filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
-              return b->hasIntersectionWith(
-                  Block->BoundingBox.unionWith(Line->BoundingBox));
-            });
-        if (!Problems.empty())
-          clsPdfLaDebug::instance()
-              .createImage(this)
-              .add(Block)
-              .add(Line)
-              .add(Problems)
-              .show("Consume");
+        // auto Problems =
+        //     filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
+        //       return b->hasIntersectionWith(
+        //           Block->BoundingBox.unionWith(Line->BoundingBox));
+        //     });
+        // if (!Problems.empty())
+        //   clsPdfLaDebug::instance()
+        //       .createImage(this)
+        //       .add(Block)
+        //       .add(Line)
+        //       .add(Problems)
+        //       .show("Consume");
 
         Block->BoundingBox.unionWith_(Line->BoundingBox);
         Block.asText()->Lines.push_back(Line);
@@ -723,18 +738,18 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
         }
       if (Blocked) break;
 
-      auto Problems = filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
-        return b->hasIntersectionWith(
-            Block->BoundingBox.unionWith(Line->BoundingBox));
-      });
-      if (!Problems.empty())
-        clsPdfLaDebug::instance()
-            .createImage(this)
-            .add(Block)
-            .add(Line)
-            .add(LinesOnSameVerticalStripe)
-            .add(Problems)
-            .show("AddToBlock");
+      // auto Problems = filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
+      //   return b->hasIntersectionWith(
+      //       Block->BoundingBox.unionWith(Line->BoundingBox));
+      // });
+      // if (!Problems.empty())
+      //   clsPdfLaDebug::instance()
+      //       .createImage(this)
+      //       .add(Block)
+      //       .add(Line)
+      //       .add(LinesOnSameVerticalStripe)
+      //       .add(Problems)
+      //       .show("AddToBlock");
 
       Block->BoundingBox.unionWith_(Line->BoundingBox);
       Block.asText()->Lines.push_back(Line);
@@ -814,12 +829,12 @@ DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
       SortedChars, SortedFigures, WhitespaceCover, PageSize));
   auto Blocks = this->findPageTextBlocks(Lines, Figures, WhitespaceCover);
 
-  clsPdfLaDebug::instance()
-      .createImage(this)
-      .add(Blocks)
-      .add(Figures)
-      .add(WhitespaceCover)
-      .show("DDD");
+  // clsPdfLaDebug::instance()
+  //     .createImage(this)
+  //     .add(Blocks)
+  //     .add(Figures)
+  //     .add(WhitespaceCover)
+  //     .show("DDD");
 
   for (const auto Item : Figures) {
     clsDocBlockPtr FigureBlock;
