@@ -100,6 +100,7 @@ int main(void) {
   const std::vector<std::tuple<std::string, std::vector<size_t>>> ChosenPdfs{
       // { "bi-1276.pdf", { 6 } },
       // { "bi-1247.pdf", { 15, 16 } }, // Check the white space coverage
+      { "bi-1247.pdf", { 0 } }, // Check the white space coverage
       // { "bi-1127.pdf", { 0 } }, // Check detection of lines
       // { "bi-1097.pdf", {1, 5} },
       // { "bi-1121.pdf", { 0 } },
@@ -113,6 +114,13 @@ int main(void) {
 
       // { "bi-1028.pdf", { 2 } },
       // { "bi-1023.pdf", { 1 } },
+      // { "bi-1031.pdf", { 11 } },
+      // { "bi-1003.pdf", { 2 } },
+
+      // { "bi-1029.pdf", { 2 } },
+      // { "bi-1086.pdf", { 0 } },
+      // { "bi-1156.pdf", { 6 } },
+      // { "bi-1228.pdf", { 0 } },
   };
   std::vector<std::tuple<fs::path, std::vector<size_t>>> PdfFilePaths;
   if (ChosenPdfs.size()) {

@@ -28,6 +28,29 @@ void stuBoundingBox::unionWith_(const BoundingBoxPtr_t &_other) {
   this->unionWith_(*_other);
 }
 
+void stuBoundingBox::unionWithInDirection_(const stuBoundingBox &_other,
+                                           bool _horizontally) {
+  auto unionWithInDirectionImpl = [](float &_p0, float &_size,
+                                     const float &_otherP0,
+                                     const float &_otherSize) {
+    float minP = std::min(_p0, _otherP0);
+    float maxP = std::max(_p0 + _size, _otherP0 + _otherSize);
+    _p0 = minP;
+    _size = maxP - minP;
+  };
+  if (_horizontally)
+    unionWithInDirectionImpl(this->Origin.X, this->Size.Width, _other.Origin.X,
+                             _other.Size.Width);
+  else
+    unionWithInDirectionImpl(this->Origin.Y, this->Size.Height, _other.Origin.Y,
+                             _other.Size.Height);
+}
+
+void stuBoundingBox::unionWithInDirection_(const BoundingBoxPtr_t &_other,
+                                           bool _horizontally) {
+  this->unionWithInDirection_(*_other, _horizontally);
+}
+
 stuBoundingBox stuBoundingBox::unionWith(const stuBoundingBox &_other) const {
   stuBoundingBox Union = *this;
   Union.unionWith_(_other);
@@ -36,6 +59,18 @@ stuBoundingBox stuBoundingBox::unionWith(const stuBoundingBox &_other) const {
 
 stuBoundingBox stuBoundingBox::unionWith(const BoundingBoxPtr_t &_other) const {
   return this->unionWith(*_other);
+}
+
+stuBoundingBox stuBoundingBox::unionWithInDirection(
+    const stuBoundingBox &_other, bool _horizontally) {
+  auto Copy = *this;
+  Copy.unionWithInDirection_(_other, _horizontally);
+  return Copy;
+}
+
+stuBoundingBox stuBoundingBox::unionWithInDirection(
+    const BoundingBoxPtr_t &_other, bool _horizontally) {
+  return this->unionWithInDirection(*_other, _horizontally);
 }
 
 void stuBoundingBox::intersectWith_(const stuBoundingBox &_other) {
@@ -63,8 +98,12 @@ stuBoundingBox stuBoundingBox::intersectWith(
 }
 
 bool stuBoundingBox::hasIntersectionWith(const stuBoundingBox &_other) const {
-  return this->horizontalOverlap(_other) > MIN_ITEM_SIZE &&
-         this->verticalOverlap(_other) > MIN_ITEM_SIZE;
+  auto ThresholdX =
+      std::min(std::min(this->width(), _other.width()) - 0.01f, MIN_ITEM_SIZE);
+  auto ThresholdY = std::min(std::min(this->height(), _other.height()) - 0.01f,
+                             MIN_ITEM_SIZE);
+  return this->horizontalOverlap(_other) > ThresholdX &&
+         this->verticalOverlap(_other) > ThresholdY;
 }
 
 bool stuBoundingBox::hasIntersectionWith(const BoundingBoxPtr_t &_other) const {

@@ -120,53 +120,56 @@ float clsPdfLaInternals::computeWordSeparationThreshold(
 BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
     const BoundingBoxPtr_t &_bounds, const BoundingBoxPtrVector_t &_obstacles,
     float _minCoverLegSize) {
-  constexpr float MIN_COVER_SIZE = 4.f;
-  constexpr float MIN_COVER_PERIMETER = 128.f;
-  constexpr float MIN_COVER_AREA = 2048.f;
-  constexpr size_t MAX_COVER_NUMBER_OF_ITEMS = 30;
+  clsPdfLaDebug::instance().createImage(this).add(_obstacles).show("OBS");
 
-  auto candidateIsAcceptable = [&](const BoundingBoxPtr_t &_bounds) {
-    return _bounds->width() >= MIN_COVER_SIZE &&
-           _bounds->height() >= MIN_COVER_SIZE &&
-           _bounds->height() >= _bounds->width() &&
-           _bounds->width() + _bounds->height() >= MIN_COVER_PERIMETER &&
-           _bounds->area() >= MIN_COVER_AREA;
-  };
+  float MinCoverWidth = 0.5f * _minCoverLegSize;
+  const float MinCoverHeight = 2.f * _minCoverLegSize;
 
   BoundingBoxPtrVector_t Result;
   if (true) {
     BoundingBoxPtrVector_t L2R, T2B;
 
     std::vector<float> Xs, Ys;
+    float MinX = _bounds->right(), MaxX = _bounds->left(),
+          MinY = _bounds->bottom(), MaxY = _bounds->top();
     Xs.push_back(_bounds->right());
     Ys.push_back(_bounds->bottom());
     for (const auto &Obstacle : _obstacles) {
+      MinX = std::min(MinX, Obstacle->left());
+      MinY = std::min(MinY, Obstacle->top());
+      MaxX = std::max(MaxX, Obstacle->right());
+      MaxY = std::max(MaxY, Obstacle->bottom());
       Xs.insert(Xs.end(), {Obstacle->left(), Obstacle->right()});
       Ys.insert(Ys.end(), {Obstacle->top(), Obstacle->bottom()});
     }
     std::sort(Xs.begin(), Xs.end());
     std::sort(Ys.begin(), Ys.end());
 
-    auto filterPositions = [](std::vector<float> &_positions) {
+    auto filterPositions = [&](std::vector<float> &_positions, float _min,
+                               float _max) {
       std::vector<float> Filtered;
       for (size_t i = 1; i < _positions.size(); ++i) {
-        if (std::abs(_positions[i] - _positions[i - 1]) > MIN_COVER_SIZE) {
-          if (Filtered.empty() || Filtered.back() != _positions[i - 1])
+        if (std::abs(_positions[i] - _positions[i - 1]) > MinCoverWidth) {
+          if (Filtered.empty() || Filtered.back() != _positions[i - 1]) {
+            if (Filtered.empty() && _min != _positions[i - 1])
+              Filtered.push_back(_min);
             Filtered.push_back(_positions[i - 1]);
+          }
           Filtered.push_back(_positions[i]);
         }
       }
+      if (Filtered.back() != _max) Filtered.push_back(_max);
       _positions = std::move(Filtered);
     };
 
-    filterPositions(Xs);
-    filterPositions(Ys);
+    filterPositions(Xs, MinX, MaxX);
+    filterPositions(Ys, MinY, MaxY);
 
-    if (std::abs(Xs.front() - _bounds->left()) < MIN_COVER_SIZE)
+    if (std::abs(Xs.front() - _bounds->left()) < MinCoverWidth)
       Xs.front() = _bounds->left();
     else
       Xs.insert(Xs.begin(), _bounds->left());
-    if (std::abs(Ys.front() - _bounds->top()) < MIN_COVER_SIZE)
+    if (std::abs(Ys.front() - _bounds->top()) < MinCoverWidth)
       Ys.front() = _bounds->top();
     else
       Ys.insert(Ys.begin(), _bounds->top());
@@ -179,19 +182,28 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
     for (size_t iY = 1; iY < Ys.size(); ++iY) {
       for (size_t iX = 1; iX < Xs.size(); ++iX) {
         auto NewItem = std::make_shared<stuBoundingBox>(
-            Xs[iX - 1] + 1, Ys[iY - 1] + 1, Xs[iX] - 1, Ys[iY] - 1);
-        for (const auto &Obstacle : _obstacles)
+            Xs[iX - 1] + 0.01f, Ys[iY - 1] + 0.01f, Xs[iX] - 0.01f,
+            Ys[iY] - 0.01f);
+        for (const auto &Obstacle : _obstacles) {
           if (NewItem.get() != nullptr &&
               NewItem->hasIntersectionWith(Obstacle)) {
             NewItem.reset();
             break;
           }
+        }
         if (NewItem.get() != nullptr) {
           L2R[(iX - 1) + (iY - 1) * NX] = NewItem;
           T2B[(iY - 1) + (iX - 1) * NY] = NewItem;
         }
       }
     }
+
+    clsPdfLaDebug::instance()
+        .createImage(this)
+        .add(_obstacles)
+        .add(T2B)
+        .save("P2B")
+        .show("P2B");
 
     for (size_t iX = 1; iX < NX; ++iX) {
       size_t Offset = (iX - 1) * NY;
@@ -210,6 +222,13 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
         L2R[(iX - 1) + j * NX].reset();
       }
     }
+
+    clsPdfLaDebug::instance()
+        .createImage(this)
+        .add(_obstacles)
+        .add(T2B)
+        .save("T2B")
+        .show("T2B");
 
     for (size_t iY = 1; iY < NY; ++iY) {
       size_t Offset = (iY - 1) * NX;
@@ -235,9 +254,19 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
       }
     }
 
+    clsPdfLaDebug::instance()
+        .createImage(this)
+        .add(_obstacles)
+        .add(L2R)
+        .save("L2R")
+        .show("L2R");
+
     Result = std::move(L2R);
     filterNullPtrs_(Result);
-    filter_(Result, candidateIsAcceptable);
+    filter_(Result, [&](const BoundingBoxPtr_t &e) {
+      return e->width() > 3.f * MinCoverWidth && e->height() > MinCoverHeight &&
+             e->height() > 1.5f * e->width();
+    });
   }
 
   return Result;
@@ -245,83 +274,82 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
 
 BoundingBoxPtrVector_t clsPdfLaInternals::getWhitespaceCoverage(
     const DocItemPtrVector_t &_sortedDocItems, const stuSize &_pageSize,
-    float _meanCharWidth, float _wordSeparationThreshold) {
+    float _meanCharHeight, float _wordSeparationThreshold) {
   constexpr float APPROXIMATE_FULL_OVERLAP_RATIO = 0.95f;
 
-  DocItemPtrVector_t Blobs;
+  BoundingBoxPtrVector_t Blobs;
   DocItemPtr_t PrevItem = nullptr;
   for (size_t i = 0; i < _sortedDocItems.size(); ++i) {
     const auto &ThisItem = _sortedDocItems.at(i);
     if (ThisItem->Type != enuDocItemType::Char) continue;
     if (Blobs.empty()) {
-      Blobs.push_back(std::make_shared<stuDocItem>(*ThisItem));
+      Blobs.push_back(std::make_shared<stuBoundingBox>(ThisItem->BoundingBox));
       PrevItem = ThisItem;
       continue;
     }
     bool DoNotPushback = false;
+    // TODO: Deal with this magic constant
     if (ThisItem->Type == PrevItem->Type &&
         ThisItem->BoundingBox.verticalOverlapRatio(PrevItem->BoundingBox) >
-            0.5) {
-      auto dx = static_cast<int32_t>(ThisItem->BoundingBox.left() -
-                                     PrevItem->BoundingBox.right() + 0.5);
-      if (dx < _wordSeparationThreshold) {
-        Blobs.back()->BoundingBox.unionWith_(ThisItem->BoundingBox);
+            0.5f) {
+      auto dx = std::abs(static_cast<int32_t>(
+          ThisItem->BoundingBox.left() - PrevItem->BoundingBox.right() + 0.5f));
+      if (dx < std::max(_wordSeparationThreshold,
+                        std::min(PrevItem->BoundingBox.height(),
+                                 ThisItem->BoundingBox.height()))) {
+        Blobs.back()->unionWith_(ThisItem->BoundingBox);
         DoNotPushback = true;
       }
     }
-    if (!DoNotPushback)
-      Blobs.push_back(std::make_shared<stuDocItem>(*ThisItem));
+    if (!DoNotPushback) {
+      Blobs.push_back(std::make_shared<stuBoundingBox>(ThisItem->BoundingBox));
+    }
     PrevItem = ThisItem;
   }
 
-  for (const auto &Item :
-       filter(_sortedDocItems, [](const DocItemPtr_t &_item) {
-         return _item->Type != enuDocItemType::Char;
-       })) {
-    if (Item->BoundingBox.area() <=
-        MAX_IMAGE_BLOB_AREA_FACTOR * _pageSize.area())
-      Blobs.push_back(Item);
-  }
-
-  auto RawCover = this->getRawWhitespaceCover(
-      std::make_shared<stuBoundingBox>(stuPoint(), _pageSize),
-      map(Blobs,
-          [](const DocItemPtr_t &Item) {
-            return std::make_shared<stuBoundingBox>(Item->BoundingBox);
-          }),
-      _meanCharWidth);
-
-  auto Cover = filter(RawCover, [](const BoundingBoxPtr_t &a) {
-    return a->width() < a->height();
-  });
-  RawCover = filter(RawCover, [](const BoundingBoxPtr_t &a) {
-    return a->width() >= a->height();
-  });
-  for (auto &CoverItem : Cover) {
-    for (const auto &HelperItem : RawCover)
-      if (CoverItem->horizontalOverlap(HelperItem) >=
-          APPROXIMATE_FULL_OVERLAP_RATIO * CoverItem->width()) {
-        if (CoverItem->verticalOverlap(HelperItem) > -MIN_ITEM_SIZE) {
-          float Y0 = std::min(CoverItem->top(), HelperItem->top());
-          float Y1 = std::max(CoverItem->bottom(), HelperItem->bottom());
-          CoverItem->Origin.Y = Y0;
-          CoverItem->Size.Height = Y1 - Y0;
+  while (true) {
+    bool ChangeOcurred = false;
+    for (auto &Blob : Blobs) {
+      if (Blob.get() == nullptr) continue;
+      for (auto &OtherBlob : Blobs) {
+        if (OtherBlob.get() == nullptr) continue;
+        if (OtherBlob == Blob) continue;
+        if (Blob->verticalOverlap(OtherBlob) > -_meanCharHeight &&
+            Blob->horizontalOverlap(OtherBlob) > _meanCharHeight) {
+          Blob->unionWith_(OtherBlob);
+          OtherBlob.reset();
+          ChangeOcurred = true;
         }
       }
+    }
+    if (!ChangeOcurred) break;
   }
-  RawCover = Cover;
-  Cover.clear();
-  for (const auto &CandidateCoverItem : RawCover) {
-    bool MergedWithAnotherItem = false;
-    for (auto &StoredCoverItem : Cover)
-      if (StoredCoverItem->hasIntersectionWith(CandidateCoverItem) &&
-          StoredCoverItem->horizontalOverlapRatio(CandidateCoverItem) >=
-              APPROXIMATE_FULL_OVERLAP_RATIO) {
-        StoredCoverItem->unionWith_(CandidateCoverItem);
-        MergedWithAnotherItem = true;
+  filterNullPtrs_(Blobs);
+
+  auto Cover = this->getRawWhitespaceCover(
+      std::make_shared<stuBoundingBox>(stuPoint(), _pageSize), Blobs,
+      _meanCharHeight);
+
+  if (!Cover.empty()) {
+    sort_(Cover, [](const BoundingBoxPtr_t &e) { return e->height(); });
+    for (auto Iterator = ++Cover.begin(); Iterator != Cover.end(); ++Iterator) {
+      auto OtherIterator = Iterator;
+      while (OtherIterator != Cover.begin()) {
+        --OtherIterator;
+        if (OtherIterator->get() == nullptr) continue;
+        if (Iterator->get()->verticalOverlapRatio(*OtherIterator) >=
+            APPROXIMATE_FULL_OVERLAP_RATIO) {
+          auto HorizontalUnion =
+              OtherIterator->get()->unionWithInDirection(*Iterator, true);
+          if (!any(Blobs, [&](const BoundingBoxPtr_t &e) {
+                return e->hasIntersectionWith(HorizontalUnion);
+              }))
+            OtherIterator->reset();
+        }
       }
-    if (!MergedWithAnotherItem) Cover.push_back(CandidateCoverItem);
+    }
   }
+  filterNullPtrs_(Cover);
 
   return Cover;
 }
@@ -366,11 +394,15 @@ auto clsPdfLaInternals::preparePreliminaryData(
   auto MeanCharWidth = mean(SortedChars, [](const DocItemPtr_t &e) {
     return e->BoundingBox.width();
   });
+  auto MeanCharHeight = mean(SortedChars, [](const DocItemPtr_t &e) {
+    return e->BoundingBox.height();
+  });
   auto WordSeparationThreshold = this->computeWordSeparationThreshold(
       SortedChars, MeanCharWidth, _pageSize.Width);
   auto WhitespaceCover =
       this->getWhitespaceCoverage(cat(SortedChars, SortedFigures), _pageSize,
-                                  MeanCharWidth, WordSeparationThreshold);
+                                  MeanCharHeight, WordSeparationThreshold);
+  clsPdfLaDebug::instance().createImage(this).add(WhitespaceCover).save("WSC");
   return std::make_tuple(SortedChars, SortedFigures, MeanCharWidth,
                          WordSeparationThreshold, WhitespaceCover);
 }
@@ -579,11 +611,8 @@ clsPdfLaInternals::findPageLinesAndFigures(
 
   filterNullPtrs_(ResultLines);
 
-  // clsPdfLaDebug::instance()
-  //     .createImage(this)
-  //     .add(ResultLines)
-  //     .save("Lines")
-  //     .show("Lines");
+  // clsPdfLaDebug::instance().createImage(this).add(ResultLines).save("Lines")
+  // .show("Lines");
 
   return std::make_tuple(ResultLines, ResultFigures);
 }
@@ -738,8 +767,8 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
         }
       if (Blocked) break;
 
-      // auto Problems = filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
-      //   return b->hasIntersectionWith(
+      // auto Problems = filter(_pageFigures, [&](const auto &b) {
+      //   return b->BoundingBox.hasIntersectionWith(
       //       Block->BoundingBox.unionWith(Line->BoundingBox));
       // });
       // if (!Problems.empty())
@@ -817,11 +846,12 @@ DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
     }
   }
 
-  auto Items = filter(this->PdfiumWrapper->getPageItems(_pageIndex),
-                      [](const DocItemPtr_t &e) {
-                        return e->BoundingBox.width() > MIN_ITEM_SIZE &&
-                               e->BoundingBox.height() > MIN_ITEM_SIZE;
-                      });
+  // TODO: Deal with this magic constant
+  auto Items = filter(
+      this->PdfiumWrapper->getPageItems(_pageIndex), [](const DocItemPtr_t &e) {
+        return e->BoundingBox.width() * e->BoundingBox.height() >
+               2.f * MIN_ITEM_SIZE * MIN_ITEM_SIZE;
+      });
   auto [SortedChars, SortedFigures, MeanCharWidth, WordSeparationThreshold,
         WhitespaceCover] =
       std::move(this->preparePreliminaryData(Items, PageSize));

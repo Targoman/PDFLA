@@ -96,8 +96,14 @@ struct stuBoundingBox {
   void unionWith_(const stuBoundingBox &_other);
   void unionWith_(const BoundingBoxPtr_t &_other);
 
+  void unionWithInDirection_(const stuBoundingBox &_other, bool _horizontally);
+  void unionWithInDirection_(const BoundingBoxPtr_t &_other, bool _horizontally);
+
   stuBoundingBox unionWith(const stuBoundingBox &_other) const;
   stuBoundingBox unionWith(const BoundingBoxPtr_t &_other) const;
+
+  stuBoundingBox unionWithInDirection(const stuBoundingBox &_other, bool _horizontally);
+  stuBoundingBox unionWithInDirection(const BoundingBoxPtr_t &_other, bool _horizontally);
 
   void intersectWith_(const stuBoundingBox &_other);
   void intersectWith_(const BoundingBoxPtr_t &_other);

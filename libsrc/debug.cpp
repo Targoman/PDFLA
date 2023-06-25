@@ -155,7 +155,7 @@ clsPdfLaDebugImage& clsPdfLaDebugImage::add(
   cv::Scalar BorderColor(COLORS[ColorIndex][0] / 3, COLORS[ColorIndex][1] / 3,
                          COLORS[ColorIndex][2] / 3);
   for (auto& BoundingBox : _boundingBoxes) {
-    if (BoundingBox == nullptr) continue;
+    if (BoundingBox == nullptr || BoundingBox->isEmpty()) continue;
     this->Data->RoiBounds.unionWith_(*BoundingBox);
     cv::Rect Rect = bbox2CvRect(BoundingBox->scale(DEBUG_UPSCALE_FACTOR));
     if (Rect.area() < 4) continue;
@@ -163,11 +163,13 @@ clsPdfLaDebugImage& clsPdfLaDebugImage::add(
     cv::Mat RoiCopy = ROI.clone();
     cv::rectangle(RoiCopy, cv::Rect(0, 0, Rect.width, Rect.height), FillColor,
                   -1);
-    cv::rectangle(RoiCopy, cv::Rect(3, 3, Rect.width - 6, Rect.height - 6), BorderColor,
-                  3);
+    cv::rectangle(RoiCopy, cv::Rect(3, 3, Rect.width - 6, Rect.height - 6),
+                  BorderColor, 3);
     cv::addWeighted(ROI, 0.3, RoiCopy, 0.7, 0, ROI);
 
-    cv::putText(this->Data->PageImage, std::to_string(ColorIndex), cv::Point(Rect.x, Rect.br().y), cv::FONT_HERSHEY_PLAIN, 3, cv::Scalar(0), 3);
+    cv::putText(this->Data->PageImage, std::to_string(ColorIndex),
+                cv::Point(Rect.x, Rect.br().y), cv::FONT_HERSHEY_PLAIN, 3,
+                cv::Scalar(0), 3);
   }
   return *this;
 }
@@ -177,8 +179,8 @@ clsPdfLaDebugImage& clsPdfLaDebugImage::show(const std::string& _tag) {
   if (this->Data->PageImage.empty()) return *this;
 
   std::ostringstream ss;
-  ss << this->Data->Basename << "_" << _tag << "_p" << std::setw(3)
-     << this->Data->PageIndex << ".png";
+  ss << this->Data->Basename << "_p" << this->Data->PageIndex << std::setw(3)
+     << "_" << _tag << ".png";
 
   stuBoundingBox Union = this->Data->RoiBounds;
 
@@ -209,8 +211,8 @@ clsPdfLaDebugImage& clsPdfLaDebugImage::save(const std::string& _tag) {
   if (this->Data->PageImage.empty()) return *this;
 
   std::ostringstream ss;
-  ss << this->Data->DebugOutputPath << "/" << this->Data->Basename << "_"
-     << _tag << "_p" << std::setw(3) << this->Data->PageIndex << ".png";
+  ss << this->Data->DebugOutputPath << "/" << this->Data->Basename << "_p"
+     << std::setw(3) << this->Data->PageIndex << "_" << _tag << ".png";
   cv::imwrite(ss.str(), this->Data->PageImage);
 
   return *this;

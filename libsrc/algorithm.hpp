@@ -13,6 +13,44 @@
 namespace Targoman {
 namespace Common {
 
+template <typename T, typename F, typename = void>
+struct stuSortFunctorHelper {};
+
+template <typename T, typename F>
+struct stuSortFunctorHelper<T, F,
+                            decltype((void)std::declval<F>()(
+                                std::declval<T>(), std::declval<T>()))> {
+  static constexpr bool IsComparator = true;
+  static constexpr bool IsKeyMapper = false;
+};
+
+template <typename T, typename F>
+struct stuSortFunctorHelper<
+    T, F, decltype((void)std::declval<F>()(std::declval<T>()))> {
+  static constexpr bool IsComparator = false;
+  static constexpr bool IsKeyMapper = true;
+};
+
+template <typename T0, typename Functor_t>
+std::enable_if_t<
+    stuSortFunctorHelper<typename stuContainerTypeTraits<T0>::ElementType_t,
+                         Functor_t>::IsComparator>
+sort_(T0 &v, Functor_t f) {
+  std::sort(v.begin(), v.end(), f);
+};
+
+template <typename T0, typename Functor_t>
+std::enable_if_t<stuSortFunctorHelper<
+    typename stuContainerTypeTraits<T0>::ElementType_t, Functor_t>::IsKeyMapper>
+sort_(T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  std::sort(v.begin(), v.end(),
+            [&](const typename ContainerTraits_t::ElementBareType_t &a,
+               const typename ContainerTraits_t::ElementBareType_t &b) {
+              return f(a) < f(b);
+            });
+};
+
 template <typename T0, typename Functor_t>
 auto map(const T0 &v, Functor_t f) {
   using ContainerTraits_t = stuContainerTypeTraits<T0>;
