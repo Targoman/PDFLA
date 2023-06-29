@@ -723,7 +723,8 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
   // Merge reference number into the text block
   for (auto &Item : Result) {
     if (Item.get() == nullptr) continue;
-    if (Item->BoundingBox.width() < _pageBounds.width() / 3) continue;
+    if (Item->BoundingBox.width() < _pageBounds.width() / 5) continue;
+    if (Item.asText()->Lines.size() < 2) continue;
     clsDocBlockPtr RefNumber;
     for (auto &OtherItem : Result) {
       if (OtherItem.get() == nullptr) continue;
@@ -742,20 +743,19 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
     }
 
     // TODO: Deal with this magic constant
-    if (RefNumber && RefNumber->BoundingBox.horizontalOverlap(Item->BoundingBox) > -5.f * std::min(
-      RefNumber.asText()->Lines.front()->BoundingBox.height(),
-      Item.asText()->Lines.front()->BoundingBox.height()
-    )) {
+    if (RefNumber /* &&
+        RefNumber->BoundingBox.horizontalOverlap(Item->BoundingBox) >
+            -5.f * std::min(
+                       RefNumber.asText()->Lines.front()->BoundingBox.height(),
+                       Item.asText()->Lines.front()->BoundingBox.height())*/) {
       auto Union = Item->BoundingBox.unionWith(RefNumber->BoundingBox);
       auto AllRefNumbers = filter(Result, [&](const clsDocBlockPtr &e) {
         return e.get() != nullptr && e.get() != Item.get() &&
                e->BoundingBox.hasIntersectionWith(Union);
       });
-      clsPdfLaDebug::instance()
-          .createImage(this)
-          .add(Item)
-          .add(AllRefNumbers)
-          .show("ASD");
+
+      clsPdfLaDebug::instance().createImage(this).add(Item).add(AllRefNumbers).show("ASD");
+
       // TODO: Deal with this magic constant
       if (all(AllRefNumbers, [&](const clsDocBlockPtr &e) {
             return e->BoundingBox.width() <= Item->BoundingBox.width() / 8 &&
