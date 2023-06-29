@@ -36,7 +36,7 @@ class clsPdfLaInternals {
       const DocItemPtrVector_t &_sortedFigures,
       const BoundingBoxPtrVector_t &_whitespaceCover, const stuSize &_pageSize);
   DocBlockPtrVector_t findPageTextBlocks(
-      const DocLinePtrVector_t &_pageLines,
+      const stuBoundingBox &_pageBounds, const DocLinePtrVector_t &_pageLines,
       const DocItemPtrVector_t &_pageFigures,
       const BoundingBoxPtrVector_t &_whitespaceCover);
 
@@ -120,153 +120,85 @@ float clsPdfLaInternals::computeWordSeparationThreshold(
 BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
     const BoundingBoxPtr_t &_bounds, const BoundingBoxPtrVector_t &_obstacles,
     float _minCoverLegSize) {
-  clsPdfLaDebug::instance().createImage(this).add(_obstacles).show("OBS");
-
-  float MinCoverWidth = 0.5f * _minCoverLegSize;
-  const float MinCoverHeight = 2.f * _minCoverLegSize;
+  constexpr float MIN_COVER_SIZE = 4.f;
+  constexpr float MIN_COVER_PERIMETER = 128.f;
+  constexpr float MIN_COVER_AREA = 2048.f;
+  constexpr size_t MAX_COVER_NUMBER_OF_ITEMS = 30;
 
   BoundingBoxPtrVector_t Result;
-  if (true) {
-    BoundingBoxPtrVector_t L2R, T2B;
-
-    std::vector<float> Xs, Ys;
-    float MinX = _bounds->right(), MaxX = _bounds->left(),
-          MinY = _bounds->bottom(), MaxY = _bounds->top();
-    Xs.push_back(_bounds->right());
-    Ys.push_back(_bounds->bottom());
-    for (const auto &Obstacle : _obstacles) {
-      MinX = std::min(MinX, Obstacle->left());
-      MinY = std::min(MinY, Obstacle->top());
-      MaxX = std::max(MaxX, Obstacle->right());
-      MaxY = std::max(MaxY, Obstacle->bottom());
-      Xs.insert(Xs.end(), {Obstacle->left(), Obstacle->right()});
-      Ys.insert(Ys.end(), {Obstacle->top(), Obstacle->bottom()});
+  auto candidateIsAcceptable = [&](const BoundingBoxPtr_t &_bounds) {
+    return _bounds->width() >= std::max(_minCoverLegSize, MIN_COVER_SIZE) &&
+           _bounds->height() >=
+               3.f * std::max(_minCoverLegSize, MIN_COVER_SIZE) &&
+           _bounds->width() + _bounds->height() >= MIN_COVER_PERIMETER &&
+           _bounds->area() >= MIN_COVER_AREA;
+  };
+  auto calculateCandidateScore = [&](const BoundingBoxPtr_t &_candidate) {
+    constexpr float WLT = 2.f;
+    constexpr float WHT = 4.f;
+    if (_candidate->width() <= WLT * _minCoverLegSize)
+      return _candidate->height() + _candidate->width();
+    else if (_candidate->width() > WHT * _minCoverLegSize)
+      return 2.f * _candidate->height();
+    else {
+      float C = std::cos(M_PIf * (_candidate->width() - WLT) / (WHT - WLT));
+      return (2.f / (1 + C)) * (_candidate->height() + C * _candidate->width());
     }
-    std::sort(Xs.begin(), Xs.end());
-    std::sort(Ys.begin(), Ys.end());
+  };
+  auto findNextLargetsCover =
+      [&](const BoundingBoxPtr_t &_bounds,
+          const BoundingBoxPtrVector_t &_obstacles) -> BoundingBoxPtr_t {
+    typedef std::tuple<float, BoundingBoxPtr_t, BoundingBoxPtrVector_t>
+        Candidate_t;
+    std::vector<Candidate_t> Candidates{
+        std::make_tuple(calculateCandidateScore(_bounds), _bounds, _obstacles)};
+    while (true) {
+      if (Candidates.empty()) return std::make_shared<stuBoundingBox>();
 
-    auto filterPositions = [&](std::vector<float> &_positions, float _min,
-                               float _max) {
-      std::vector<float> Filtered;
-      for (size_t i = 1; i < _positions.size(); ++i) {
-        if (std::abs(_positions[i] - _positions[i - 1]) > MinCoverWidth) {
-          if (Filtered.empty() || Filtered.back() != _positions[i - 1]) {
-            if (Filtered.empty() && _min != _positions[i - 1])
-              Filtered.push_back(_min);
-            Filtered.push_back(_positions[i - 1]);
-          }
-          Filtered.push_back(_positions[i]);
-        }
+      auto ArgMax = argmax(Candidates, [&](const Candidate_t &_candidate) {
+        return candidateIsAcceptable(std::get<1>(_candidate))
+                   ? std::get<0>(_candidate)
+                   : -1;
+      });
+
+      auto [Score, Cover, Obstacles] = std::move(Candidates[ArgMax]);
+      Candidates.erase(Candidates.begin() + ArgMax);
+
+      if (Obstacles.empty() || Score < 1) {
+        return Cover;
       }
-      if (Filtered.back() != _max) Filtered.push_back(_max);
-      _positions = std::move(Filtered);
-    };
-
-    filterPositions(Xs, MinX, MaxX);
-    filterPositions(Ys, MinY, MaxY);
-
-    if (std::abs(Xs.front() - _bounds->left()) < MinCoverWidth)
-      Xs.front() = _bounds->left();
-    else
-      Xs.insert(Xs.begin(), _bounds->left());
-    if (std::abs(Ys.front() - _bounds->top()) < MinCoverWidth)
-      Ys.front() = _bounds->top();
-    else
-      Ys.insert(Ys.begin(), _bounds->top());
-
-    size_t NX = Xs.size(), NY = Ys.size();
-
-    L2R.resize(NX * NY);
-    T2B.resize(NX * NY);
-
-    for (size_t iY = 1; iY < Ys.size(); ++iY) {
-      for (size_t iX = 1; iX < Xs.size(); ++iX) {
-        auto NewItem = std::make_shared<stuBoundingBox>(
-            Xs[iX - 1] + 0.01f, Ys[iY - 1] + 0.01f, Xs[iX] - 0.01f,
-            Ys[iY] - 0.01f);
-        for (const auto &Obstacle : _obstacles) {
-          if (NewItem.get() != nullptr &&
-              NewItem->hasIntersectionWith(Obstacle)) {
-            NewItem.reset();
-            break;
-          }
-        }
-        if (NewItem.get() != nullptr) {
-          L2R[(iX - 1) + (iY - 1) * NX] = NewItem;
-          T2B[(iY - 1) + (iX - 1) * NY] = NewItem;
-        }
+      auto Union = stuBoundingBox(_bounds->right(), _bounds->bottom(),
+                                  _bounds->left(), _bounds->top());
+      for (const auto &Obstacle : Obstacles) Union.unionWith_(Obstacle);
+      auto Center = Union.center();
+      auto Pivot =
+          minElement(Obstacles, [&Center](const BoundingBoxPtr_t &_obstacle) {
+            return -_obstacle->area();
+          });
+      for (auto &NewCandidate :
+           {std::make_shared<stuBoundingBox>(Pivot->right(), Cover->top(),
+                                             Cover->right(), Cover->bottom()),
+            std::make_shared<stuBoundingBox>(Cover->left(), Cover->top(),
+                                             Pivot->left(), Cover->bottom()),
+            std::make_shared<stuBoundingBox>(Cover->left(), Pivot->bottom(),
+                                             Cover->right(), Cover->bottom()),
+            std::make_shared<stuBoundingBox>(Cover->left(), Cover->top(),
+                                             Cover->right(), Pivot->top())}) {
+        if (!candidateIsAcceptable(NewCandidate)) continue;
+        Candidates.push_back(std::make_tuple(
+            calculateCandidateScore(NewCandidate), NewCandidate,
+            filter(Obstacles, [&NewCandidate](const BoundingBoxPtr_t &Item) {
+              return Item->hasIntersectionWith(NewCandidate);
+            })));
       }
     }
-
-    clsPdfLaDebug::instance()
-        .createImage(this)
-        .add(_obstacles)
-        .add(T2B)
-        .save("P2B")
-        .show("P2B");
-
-    for (size_t iX = 1; iX < NX; ++iX) {
-      size_t Offset = (iX - 1) * NY;
-      size_t i = 0;
-      for (size_t j = 1; j < NY; ++j) {
-        if (T2B[Offset + i].get() == nullptr) {
-          i = j;
-          continue;
-        }
-        if (T2B[Offset + j].get() == nullptr) {
-          i = j;
-          continue;
-        }
-        T2B[Offset + i]->unionWith_(T2B[Offset + j]);
-        T2B[Offset + j].reset();
-        L2R[(iX - 1) + j * NX].reset();
-      }
-    }
-
-    clsPdfLaDebug::instance()
-        .createImage(this)
-        .add(_obstacles)
-        .add(T2B)
-        .save("T2B")
-        .show("T2B");
-
-    for (size_t iY = 1; iY < NY; ++iY) {
-      size_t Offset = (iY - 1) * NX;
-      size_t i = 0;
-      for (size_t j = 1; j < NX; ++j) {
-        if (L2R[Offset + i].get() == nullptr) {
-          i = j;
-          continue;
-        }
-        if (L2R[Offset + j].get() == nullptr) {
-          i = j;
-          continue;
-        }
-        if (std::abs(L2R[Offset + i]->height() - L2R[Offset + j]->height()) >
-                MIN_ITEM_SIZE ||
-            L2R[Offset + i]->verticalOverlap(L2R[Offset + j]) <
-                L2R[Offset + i]->height() - 1) {
-          i = j;
-          continue;
-        }
-        L2R[Offset + i]->unionWith_(L2R[Offset + j]);
-        L2R[Offset + j].reset();
-      }
-    }
-
-    clsPdfLaDebug::instance()
-        .createImage(this)
-        .add(_obstacles)
-        .add(L2R)
-        .save("L2R")
-        .show("L2R");
-
-    Result = std::move(L2R);
-    filterNullPtrs_(Result);
-    filter_(Result, [&](const BoundingBoxPtr_t &e) {
-      return e->width() > 3.f * MinCoverWidth && e->height() > MinCoverHeight &&
-             e->height() > 1.5f * e->width();
-    });
+  };
+  auto Obstacles = _obstacles;
+  for (size_t i = 0; i < MAX_COVER_NUMBER_OF_ITEMS; ++i) {
+    auto NextCover = findNextLargetsCover(_bounds, Obstacles);
+    if (!candidateIsAcceptable(NextCover)) break;
+    Result.push_back(NextCover);
+    Obstacles.push_back(NextCover);
   }
 
   return Result;
@@ -611,14 +543,17 @@ clsPdfLaInternals::findPageLinesAndFigures(
 
   filterNullPtrs_(ResultLines);
 
-  // clsPdfLaDebug::instance().createImage(this).add(ResultLines).save("Lines")
-  // .show("Lines");
+  // clsPdfLaDebug::instance()
+  //     .createImage(this)
+  //     .add(ResultLines)
+  //     .save("Lines")
+  //     .show("Lines");
 
   return std::make_tuple(ResultLines, ResultFigures);
 }
 
 DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
-    const DocLinePtrVector_t &_pageLines,
+    const stuBoundingBox &_pageBounds, const DocLinePtrVector_t &_pageLines,
     const DocItemPtrVector_t &_pageFigures,
     const BoundingBoxPtrVector_t &_whitespaceCover) {
   auto SortedLines = _pageLines;
@@ -626,16 +561,27 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
 
   std::map<DocLinePtr_t, DocLinePtr_t> TopNeighbours;
   std::map<DocLinePtr_t, DocLinePtr_t> BottomNeighbours;
+  DocLinePtr_t PageNumberLine;
   for (auto &Line : SortedLines) {
     Line->computeBaseline();
     auto &BottomNeighbour = BottomNeighbours[Line];
     float BottomNeighbourVerticalOverlap = std::numeric_limits<float>::min();
     float BottomNeighbourHorizontalOverlap = std::numeric_limits<float>::min();
+    bool HasNoLinesUnderneath = true;
     for (auto &OtherLine : SortedLines) {
       if (Line.get() == OtherLine.get()) continue;
       if (Line->BoundingBox.top() >= OtherLine->BoundingBox.top() ||
           Line->BoundingBox.bottom() >= OtherLine->BoundingBox.bottom())
         continue;
+      // TODO: Deal with this magic constant
+      if (OtherLine->BoundingBox.horizontalOverlap(Line->BoundingBox) > 1.f) {
+        if (Line->BoundingBox.bottom() > 760) {
+          std::cout << "CHECK THIS: " << OtherLine << std::endl;
+          std::cout << "HasBoundingBoxMember:" << HasNoLinesUnderneath
+                    << std::endl;
+        }
+        HasNoLinesUnderneath = false;
+      }
       float HorizontalOverlap =
           Line->BoundingBox.horizontalOverlap(OtherLine->BoundingBox);
       // TODO: Deal with this magic constant
@@ -656,9 +602,18 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
       }
     }
     TopNeighbours[BottomNeighbour] = Line;
+    if (Line->BoundingBox.bottom() > 760) {
+      std::cout << "HasNoLinesUnderneath:" << HasNoLinesUnderneath << std::endl;
+    }
+    if (HasNoLinesUnderneath) {
+      if (Line->BoundingBox.left() < _pageBounds.centerX() &&
+          Line->BoundingBox.right() > _pageBounds.centerX())
+        PageNumberLine = Line;
+    }
   }
 
   std::set<DocLinePtr_t> UsedLines;
+  if (PageNumberLine.get() != nullptr) UsedLines.insert(PageNumberLine);
   auto getFirstUnusedLine = [&]() {
     for (auto &Line : SortedLines) {
       if (UsedLines.find(Line) == UsedLines.end()) return Line;
@@ -721,6 +676,8 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
     while (BottomNeighbours[Line].get() != nullptr) {
       auto PrevLine = Line;
       Line = BottomNeighbours[Line];
+      if(UsedLines.find(Line) != UsedLines.end())
+        break;
       auto NextLine = BottomNeighbours[Line];
       if (NextLine.get() != nullptr) {
         float V0 = PrevLine->BoundingBox.verticalOverlap(Line->BoundingBox);
@@ -772,13 +729,14 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
       //       Block->BoundingBox.unionWith(Line->BoundingBox));
       // });
       // if (!Problems.empty())
-      //   clsPdfLaDebug::instance()
-      //       .createImage(this)
-      //       .add(Block)
-      //       .add(Line)
-      //       .add(LinesOnSameVerticalStripe)
-      //       .add(Problems)
-      //       .show("AddToBlock");
+      if (Line == PageNumberLine)
+        clsPdfLaDebug::instance()
+            .createImage(this)
+            .add(Block)
+            .add(Line)
+            .add(LinesOnSameVerticalStripe)
+            // .add(Problems)
+            .show("AddToBlock");
 
       Block->BoundingBox.unionWith_(Line->BoundingBox);
       Block.asText()->Lines.push_back(Line);
@@ -857,7 +815,9 @@ DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
       std::move(this->preparePreliminaryData(Items, PageSize));
   auto [Lines, Figures] = std::move(this->findPageLinesAndFigures(
       SortedChars, SortedFigures, WhitespaceCover, PageSize));
-  auto Blocks = this->findPageTextBlocks(Lines, Figures, WhitespaceCover);
+  auto Blocks =
+      this->findPageTextBlocks(stuBoundingBox(stuPoint(0.f, 0.f), PageSize),
+                               Lines, Figures, WhitespaceCover);
 
   // clsPdfLaDebug::instance()
   //     .createImage(this)
@@ -885,7 +845,9 @@ DocBlockPtrVector_t clsPdfLaInternals::getTextBlocks(size_t _pageIndex) {
       std::move(this->preparePreliminaryData(Items, PageSize));
   auto [Lines, Figures] = std::move(this->findPageLinesAndFigures(
       SortedChars, SortedFigures, WhitespaceCover, PageSize));
-  auto Blocks = this->findPageTextBlocks(Lines, Figures, WhitespaceCover);
+  auto Blocks =
+      this->findPageTextBlocks(stuBoundingBox(stuPoint(0, 0), PageSize), Lines,
+                               Figures, WhitespaceCover);
   return Blocks;
 }
 

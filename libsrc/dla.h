@@ -2,11 +2,11 @@
 #define __TARGOMAN_DLA__
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <string>
 #include <vector>
-#include <cmath>
 
 #include "type_traits.hpp"
 
@@ -97,13 +97,16 @@ struct stuBoundingBox {
   void unionWith_(const BoundingBoxPtr_t &_other);
 
   void unionWithInDirection_(const stuBoundingBox &_other, bool _horizontally);
-  void unionWithInDirection_(const BoundingBoxPtr_t &_other, bool _horizontally);
+  void unionWithInDirection_(const BoundingBoxPtr_t &_other,
+                             bool _horizontally);
 
   stuBoundingBox unionWith(const stuBoundingBox &_other) const;
   stuBoundingBox unionWith(const BoundingBoxPtr_t &_other) const;
 
-  stuBoundingBox unionWithInDirection(const stuBoundingBox &_other, bool _horizontally);
-  stuBoundingBox unionWithInDirection(const BoundingBoxPtr_t &_other, bool _horizontally);
+  stuBoundingBox unionWithInDirection(const stuBoundingBox &_other,
+                                      bool _horizontally);
+  stuBoundingBox unionWithInDirection(const BoundingBoxPtr_t &_other,
+                                      bool _horizontally);
 
   void intersectWith_(const stuBoundingBox &_other);
   void intersectWith_(const BoundingBoxPtr_t &_other);
@@ -349,11 +352,11 @@ struct stuDocLine : public stuBoxBoundedItem {
 
   void computeBaseline();
 
-  float baselineDifference(const stuDocLine& _otherLine);
-  float baselineDifference(const DocLinePtr_t& _otherLine);
+  float baselineDifference(const stuDocLine &_otherLine);
+  float baselineDifference(const DocLinePtr_t &_otherLine);
 
-  float overlap(const stuDocLine& _otherLine) const;
-  float overlap(const DocLinePtr_t& _otherLine) const;
+  float overlap(const stuDocLine &_otherLine) const;
+  float overlap(const DocLinePtr_t &_otherLine) const;
 };
 
 enum class enuDocTextBlockAssociation { None, IsCaptionOf, IsInsideOf };
@@ -412,6 +415,60 @@ inline const stuDocTableBlock *clsDocBlockPtr::asTable() const {
 }
 inline const stuDocFormulaeBlock *clsDocBlockPtr::asFormulae() const {
   return static_cast<stuDocFormulaeBlock const *>(this->get());
+}
+
+template <typename O, typename U, typename... Ts>
+O& writeCommaSeparatedToOStream(O &_stream,  U&& _firstArg, Ts&&... _args) {
+  _stream << std::forward<U>(_firstArg);
+  (..., (_stream << ", " << std::forward<Ts>(_args)));
+  return _stream;
+}
+
+template <typename O>
+O &operator<<(O &_stream, const stuBoundingBox &_item) {
+  _stream << "BoundingBox(";
+  writeCommaSeparatedToOStream(_stream, _item.left(), _item.top(),
+                               _item.right(), _item.bottom());
+  _stream << ")";
+  return _stream;
+};
+
+template <typename O>
+O &operator<<(O &_stream, const stuDocLine &_item) {
+  _stream << "DocLine(";
+  writeCommaSeparatedToOStream(
+      _stream, _item.BoundingBox.left(), _item.BoundingBox.top(),
+      _item.BoundingBox.right(), _item.BoundingBox.bottom());
+  _stream << ")";
+  return _stream;
+};
+
+template <typename O>
+O &operator<<(O &_stream, const stuDocBlock &_item) {
+  switch (_item.Type) {
+    case enuDocBlockType::Text:
+      _stream << "TextBlock(";
+      break;
+    case enuDocBlockType::Table:
+      _stream << "TableBlock(";
+      break;
+    case enuDocBlockType::Figure:
+      _stream << "FigureBlock(";
+      break;
+    case enuDocBlockType::Formulae:
+      _stream << "FormulaeBlock(";
+      break;
+  }
+  writeCommaSeparatedToOStream(
+      _stream, _item.BoundingBox.left(), _item.BoundingBox.top(),
+      _item.BoundingBox.right(), _item.BoundingBox.bottom());
+  _stream << ")";
+  return _stream;
+};
+
+template <typename O, typename U>
+O &operator<<(O &_stream, const std::shared_ptr<U> &_item) {
+  return operator<<(_stream, *_item);
 }
 
 }  // namespace DLA
