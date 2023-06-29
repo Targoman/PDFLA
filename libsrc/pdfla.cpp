@@ -720,6 +720,15 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
 
   } while (UsedLines.size() < SortedLines.size());
 
+  if (PageNumberLine.get() != nullptr) {
+    clsDocBlockPtr Block;
+    Block.reset(new stuDocTextBlock);
+    Block->BoundingBox = PageNumberLine->BoundingBox;
+    Result.push_back(Block);
+
+    Block.asText()->Lines.push_back(PageNumberLine);
+  }
+
   // Merge reference number into the text block
   for (auto &Item : Result) {
     if (Item.get() == nullptr) continue;
