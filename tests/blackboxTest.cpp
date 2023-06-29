@@ -98,7 +98,7 @@ int main(void) {
       "/data/Work/Targoman/InternalProjects/TarjomyarV2/PDFA/debug";
 
   const std::vector<std::tuple<std::string, std::vector<size_t>>> ChosenPdfs {
-    { "bi-1252.pdf", { 8, 9 }}
+    { "bi-1247.pdf", { 14, 15, 17 }}
   };
   std::vector<std::tuple<fs::path, std::vector<size_t>>> PdfFilePaths;
   if (ChosenPdfs.size()) {

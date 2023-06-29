@@ -14,6 +14,7 @@ using namespace Targoman::Common;
 
 constexpr float MAX_IMAGE_BLOB_AREA_FACTOR = 0.5f;
 constexpr float MAX_WORD_SEPARATION_TO_MEAN_CHAR_WIDTH_RATIO = 2.f;
+constexpr float APPROXIMATE_FULL_OVERLAP_RATIO = 0.95f;
 
 class clsPdfLaInternals {
  private:
@@ -35,7 +36,7 @@ class clsPdfLaInternals {
       const DocItemPtrVector_t &_sortedChars,
       const DocItemPtrVector_t &_sortedFigures,
       const BoundingBoxPtrVector_t &_whitespaceCover, const stuSize &_pageSize);
-  DocBlockPtrVector_t findPageTextBlocks(
+  DocBlockPtrVector_t findTextBlocks(
       const stuBoundingBox &_pageBounds, const DocLinePtrVector_t &_pageLines,
       const DocItemPtrVector_t &_pageFigures,
       const BoundingBoxPtrVector_t &_whitespaceCover);
@@ -207,8 +208,6 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
 BoundingBoxPtrVector_t clsPdfLaInternals::getWhitespaceCoverage(
     const DocItemPtrVector_t &_sortedDocItems, const stuSize &_pageSize,
     float _meanCharHeight, float _wordSeparationThreshold) {
-  constexpr float APPROXIMATE_FULL_OVERLAP_RATIO = 0.95f;
-
   BoundingBoxPtrVector_t Blobs;
   DocItemPtr_t PrevItem = nullptr;
   for (size_t i = 0; i < _sortedDocItems.size(); ++i) {
@@ -552,7 +551,7 @@ clsPdfLaInternals::findPageLinesAndFigures(
   return std::make_tuple(ResultLines, ResultFigures);
 }
 
-DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
+DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
     const stuBoundingBox &_pageBounds, const DocLinePtrVector_t &_pageLines,
     const DocItemPtrVector_t &_pageFigures,
     const BoundingBoxPtrVector_t &_whitespaceCover) {
@@ -631,19 +630,6 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
     bool Consumed = false;
     for (auto &Block : Result) {
       if (Block->BoundingBox.contains(Line->BoundingBox)) {
-        // auto Problems =
-        //     filter(_whitespaceCover, [&](const BoundingBoxPtr_t &b) {
-        //       return b->hasIntersectionWith(
-        //           Block->BoundingBox.unionWith(Line->BoundingBox));
-        //     });
-        // if (!Problems.empty())
-        //   clsPdfLaDebug::instance()
-        //       .createImage(this)
-        //       .add(Block)
-        //       .add(Line)
-        //       .add(Problems)
-        //       .show("Consume");
-
         Block->BoundingBox.unionWith_(Line->BoundingBox);
         Block.asText()->Lines.push_back(Line);
         UsedLines.insert(Line);
@@ -676,7 +662,11 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
     while (BottomNeighbours[Line].get() != nullptr) {
       auto PrevLine = Line;
       Line = BottomNeighbours[Line];
-      if(UsedLines.find(Line) != UsedLines.end())
+      if (UsedLines.find(Line) != UsedLines.end()) break;
+      auto WidthThreshold = 4.f * std::min(Line->BoundingBox.height(),
+                                           Block->BoundingBox.height());
+      if (Block->BoundingBox.width() < WidthThreshold &&
+          Line->BoundingBox.width() < WidthThreshold)
         break;
       auto NextLine = BottomNeighbours[Line];
       if (NextLine.get() != nullptr) {
@@ -723,21 +713,6 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
           break;
         }
       if (Blocked) break;
-
-      // auto Problems = filter(_pageFigures, [&](const auto &b) {
-      //   return b->BoundingBox.hasIntersectionWith(
-      //       Block->BoundingBox.unionWith(Line->BoundingBox));
-      // });
-      // if (!Problems.empty())
-      if (Line == PageNumberLine)
-        clsPdfLaDebug::instance()
-            .createImage(this)
-            .add(Block)
-            .add(Line)
-            .add(LinesOnSameVerticalStripe)
-            // .add(Problems)
-            .show("AddToBlock");
-
       Block->BoundingBox.unionWith_(Line->BoundingBox);
       Block.asText()->Lines.push_back(Line);
       UsedLines.insert(Line);
@@ -745,7 +720,60 @@ DocBlockPtrVector_t clsPdfLaInternals::findPageTextBlocks(
 
   } while (UsedLines.size() < SortedLines.size());
 
+  // Merge reference number into the text block
   for (auto &Item : Result) {
+    if (Item.get() == nullptr) continue;
+    if (Item->BoundingBox.width() < _pageBounds.width() / 3) continue;
+    clsDocBlockPtr RefNumber;
+    for (auto &OtherItem : Result) {
+      if (OtherItem.get() == nullptr) continue;
+      // TODO: Deal with this magic constant
+      if (OtherItem->BoundingBox.width() > Item->BoundingBox.width() / 8)
+        continue;
+      if (OtherItem->BoundingBox.right() >= Item->BoundingBox.left()) continue;
+      if (OtherItem->BoundingBox.verticalOverlapRatio(Item->BoundingBox) <
+          APPROXIMATE_FULL_OVERLAP_RATIO)
+        continue;
+      if (RefNumber.get() == nullptr)
+        RefNumber = OtherItem;
+      else if (RefNumber->BoundingBox.horizontalOverlap(Item->BoundingBox) <
+               OtherItem->BoundingBox.horizontalOverlap(Item->BoundingBox))
+        RefNumber = OtherItem;
+    }
+
+    // TODO: Deal with this magic constant
+    if (RefNumber && RefNumber->BoundingBox.horizontalOverlap(Item->BoundingBox) > -5.f * std::min(
+      RefNumber.asText()->Lines.front()->BoundingBox.height(),
+      Item.asText()->Lines.front()->BoundingBox.height()
+    )) {
+      auto Union = Item->BoundingBox.unionWith(RefNumber->BoundingBox);
+      auto AllRefNumbers = filter(Result, [&](const clsDocBlockPtr &e) {
+        return e.get() != nullptr && e.get() != Item.get() &&
+               e->BoundingBox.hasIntersectionWith(Union);
+      });
+      clsPdfLaDebug::instance()
+          .createImage(this)
+          .add(Item)
+          .add(AllRefNumbers)
+          .show("ASD");
+      // TODO: Deal with this magic constant
+      if (all(AllRefNumbers, [&](const clsDocBlockPtr &e) {
+            return e->BoundingBox.width() <= Item->BoundingBox.width() / 8 &&
+                   e->BoundingBox.horizontalOverlapRatio(
+                       RefNumber->BoundingBox) >=
+                       APPROXIMATE_FULL_OVERLAP_RATIO;
+          })) {
+        for (auto &RefNumber : AllRefNumbers) {
+          Item.asText()->mergeWith_(RefNumber);
+          RefNumber.reset();
+        }
+      }
+    }
+  }
+
+  // Merge block that are completely inside another one into the bigger one
+  for (auto &Item : Result) {
+    if (Item.get() == nullptr) continue;
     if (Item->Type != enuDocBlockType::Text) continue;
     for (auto &OtherItem : Result) {
       if (OtherItem.get() == nullptr) continue;
@@ -816,8 +844,8 @@ DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
   auto [Lines, Figures] = std::move(this->findPageLinesAndFigures(
       SortedChars, SortedFigures, WhitespaceCover, PageSize));
   auto Blocks =
-      this->findPageTextBlocks(stuBoundingBox(stuPoint(0.f, 0.f), PageSize),
-                               Lines, Figures, WhitespaceCover);
+      this->findTextBlocks(stuBoundingBox(stuPoint(0.f, 0.f), PageSize), Lines,
+                           Figures, WhitespaceCover);
 
   // clsPdfLaDebug::instance()
   //     .createImage(this)
@@ -845,9 +873,8 @@ DocBlockPtrVector_t clsPdfLaInternals::getTextBlocks(size_t _pageIndex) {
       std::move(this->preparePreliminaryData(Items, PageSize));
   auto [Lines, Figures] = std::move(this->findPageLinesAndFigures(
       SortedChars, SortedFigures, WhitespaceCover, PageSize));
-  auto Blocks =
-      this->findPageTextBlocks(stuBoundingBox(stuPoint(0, 0), PageSize), Lines,
-                               Figures, WhitespaceCover);
+  auto Blocks = this->findTextBlocks(stuBoundingBox(stuPoint(0, 0), PageSize),
+                                     Lines, Figures, WhitespaceCover);
   return Blocks;
 }
 
