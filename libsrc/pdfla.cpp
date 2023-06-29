@@ -35,7 +35,8 @@ class clsPdfLaInternals {
   std::tuple<DocLinePtrVector_t, DocItemPtrVector_t> findPageLinesAndFigures(
       const DocItemPtrVector_t &_sortedChars,
       const DocItemPtrVector_t &_sortedFigures,
-      const BoundingBoxPtrVector_t &_whitespaceCover, const stuSize &_pageSize);
+      const BoundingBoxPtrVector_t &_whitespaceCover, float _meanCharWidth,
+      float _meanCharHeight, const stuSize &_pageSize);
   DocBlockPtrVector_t findTextBlocks(
       const stuBoundingBox &_pageBounds, const DocLinePtrVector_t &_pageLines,
       const DocItemPtrVector_t &_pageFigures,
@@ -335,14 +336,16 @@ auto clsPdfLaInternals::preparePreliminaryData(
                                   MeanCharHeight, WordSeparationThreshold);
   clsPdfLaDebug::instance().createImage(this).add(WhitespaceCover).save("WSC");
   return std::make_tuple(SortedChars, SortedFigures, MeanCharWidth,
-                         WordSeparationThreshold, WhitespaceCover);
+                         MeanCharHeight, WordSeparationThreshold,
+                         WhitespaceCover);
 }
 
 std::tuple<DocLinePtrVector_t, DocItemPtrVector_t>
 clsPdfLaInternals::findPageLinesAndFigures(
     const DocItemPtrVector_t &_sortedChars,
     const DocItemPtrVector_t &_sortedFigures,
-    const BoundingBoxPtrVector_t &_whitespaceCover, const stuSize &_pageSize) {
+    const BoundingBoxPtrVector_t &_whitespaceCover, float _meanCharWidth,
+    float _meanCharHeight, const stuSize &_pageSize) {
   DocItemPtrVector_t ResultFigures;
   for (const auto &Item : _sortedFigures) {
     if (Item->BoundingBox.area() <=
@@ -489,6 +492,26 @@ clsPdfLaInternals::findPageLinesAndFigures(
   //     .save("LineSegments")
   //     .show("LineSegments");
 
+  for (auto &Figure : ResultFigures) {
+    // TODO: Handle these magic constants
+    if (Figure->BoundingBox.height() > 2.f * _meanCharHeight) continue;
+    // if (Figure->BoundingBox.width() > 20.f * _meanCharWidth) continue;
+    for (auto &Line : ResultLines) {
+      if (Line.get() == nullptr) continue;
+      // TODO: Handle these magic constants
+      if (Figure->BoundingBox.height() < 1.5f * Line->BoundingBox.height()) {
+        if (Figure->BoundingBox.horizontalOverlap(Line->BoundingBox) >
+                -2.f * _meanCharHeight &&
+            Figure->BoundingBox.verticalOverlap(Line->BoundingBox) > -4.f) {
+          Line->BoundingBox.unionWith_(Figure->BoundingBox);
+          Line->Items.push_back(Figure);
+          Figure.reset();
+          break;
+        }
+      }
+    }
+  }
+
   for (const auto &LineSegment : ResultLines) {
     if (LineSegment.get() == nullptr) continue;
     std::vector<size_t> IndexesOfSegmentsOfSameLine;
@@ -541,12 +564,13 @@ clsPdfLaInternals::findPageLinesAndFigures(
   }
 
   filterNullPtrs_(ResultLines);
+  filterNullPtrs_(ResultFigures);
 
-  // clsPdfLaDebug::instance()
-  //     .createImage(this)
-  //     .add(ResultLines)
-  //     .save("Lines")
-  //     .show("Lines");
+  clsPdfLaDebug::instance()
+      .createImage(this)
+      .add(ResultLines)
+      .save("Lines")
+      .show("Lines");
 
   return std::make_tuple(ResultLines, ResultFigures);
 }
@@ -651,6 +675,9 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
       }
     }
 
+    // clsPdfLaDebug::instance().createImage(this).add(Result).add(Line).show(
+    //     "ASD");
+
     clsDocBlockPtr Block;
     Block.reset(new stuDocTextBlock);
     Block->BoundingBox = Line->BoundingBox;
@@ -666,8 +693,11 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
       auto WidthThreshold = 4.f * std::min(Line->BoundingBox.height(),
                                            Block->BoundingBox.height());
       if (Block->BoundingBox.width() < WidthThreshold &&
-          Line->BoundingBox.width() < WidthThreshold)
+          Line->BoundingBox.width() < WidthThreshold) {
+        // clsPdfLaDebug::instance().createImage(this).add(Result).add(Line).show(
+        //     "WDTH_TH");
         break;
+      }
       auto NextLine = BottomNeighbours[Line];
       if (NextLine.get() != nullptr) {
         float V0 = PrevLine->BoundingBox.verticalOverlap(Line->BoundingBox);
@@ -681,6 +711,12 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
       bool Blocked = false;
       for (const auto &PossibleBlocker : _pageFigures)
         if (Union.hasIntersectionWith(PossibleBlocker->BoundingBox)) {
+          // clsPdfLaDebug::instance()
+          //     .createImage(this)
+          //     .add(Block)
+          //     .add(Line)
+          //     .add(PossibleBlocker)
+          //     .show("FIG");
           Blocked = true;
           break;
         }
@@ -709,6 +745,12 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
             any(LinesOnSameVerticalStripe, [&](const DocLinePtr_t &_line) {
               return _line->BoundingBox.right() >= PossibleBlocker->right();
             })) {
+          // clsPdfLaDebug::instance()
+          //     .createImage(this)
+          //     .add(Block)
+          //     .add(Line)
+          //     .add(PossibleBlocker)
+          //     .show("WDTH_PB2");
           Blocked = true;
           break;
         }
@@ -752,18 +794,16 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
     }
 
     // TODO: Deal with this magic constant
-    if (RefNumber /* &&
+    if (RefNumber &&
         RefNumber->BoundingBox.horizontalOverlap(Item->BoundingBox) >
             -5.f * std::min(
                        RefNumber.asText()->Lines.front()->BoundingBox.height(),
-                       Item.asText()->Lines.front()->BoundingBox.height())*/) {
+                       Item.asText()->Lines.front()->BoundingBox.height())) {
       auto Union = Item->BoundingBox.unionWith(RefNumber->BoundingBox);
       auto AllRefNumbers = filter(Result, [&](const clsDocBlockPtr &e) {
         return e.get() != nullptr && e.get() != Item.get() &&
                e->BoundingBox.hasIntersectionWith(Union);
       });
-
-      clsPdfLaDebug::instance().createImage(this).add(Item).add(AllRefNumbers).show("ASD");
 
       // TODO: Deal with this magic constant
       if (all(AllRefNumbers, [&](const clsDocBlockPtr &e) {
@@ -780,6 +820,15 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
     }
   }
 
+  auto contains = [&](const clsDocBlockPtr &a, const clsDocBlockPtr &b) {
+    auto Intersection = a->BoundingBox.intersectWith(b->BoundingBox);
+    if (a->BoundingBox.area() > b->BoundingBox.area() &&
+        Intersection.area() > 0.85 * b->BoundingBox.area()) {
+      clsPdfLaDebug::instance().createImage(this).add({a, b}).show("ASDASD");
+    }
+    return Intersection.area() > 0.75 * b->BoundingBox.area();
+  };
+
   // Merge block that are completely inside another one into the bigger one
   for (auto &Item : Result) {
     if (Item.get() == nullptr) continue;
@@ -788,7 +837,7 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
       if (OtherItem.get() == nullptr) continue;
       if (Item.get() == OtherItem.get()) continue;
       if (Item->Type != OtherItem->Type) continue;
-      if (OtherItem->BoundingBox.contains(Item->BoundingBox)) {
+      if (contains(OtherItem, Item)) {
         OtherItem.asText()->mergeWith_(Item);
         Item.reset();
         break;
@@ -844,14 +893,16 @@ DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
   // TODO: Deal with this magic constant
   auto Items = filter(
       this->PdfiumWrapper->getPageItems(_pageIndex), [](const DocItemPtr_t &e) {
+        return true;
         return e->BoundingBox.width() * e->BoundingBox.height() >
-               2.f * MIN_ITEM_SIZE * MIN_ITEM_SIZE;
+               MIN_ITEM_SIZE * MIN_ITEM_SIZE;
       });
-  auto [SortedChars, SortedFigures, MeanCharWidth, WordSeparationThreshold,
-        WhitespaceCover] =
+  auto [SortedChars, SortedFigures, MeanCharWidth, MeanCharHeight,
+        WordSeparationThreshold, WhitespaceCover] =
       std::move(this->preparePreliminaryData(Items, PageSize));
-  auto [Lines, Figures] = std::move(this->findPageLinesAndFigures(
-      SortedChars, SortedFigures, WhitespaceCover, PageSize));
+  auto [Lines, Figures] = std::move(
+      this->findPageLinesAndFigures(SortedChars, SortedFigures, WhitespaceCover,
+                                    MeanCharWidth, MeanCharHeight, PageSize));
   auto Blocks =
       this->findTextBlocks(stuBoundingBox(stuPoint(0.f, 0.f), PageSize), Lines,
                            Figures, WhitespaceCover);
@@ -877,11 +928,12 @@ DocBlockPtrVector_t clsPdfLaInternals::getTextBlocks(size_t _pageIndex) {
 
   auto PageSize = this->getPageSize(_pageIndex);
   auto Items = this->PdfiumWrapper->getPageItems(_pageIndex);
-  auto [SortedChars, SortedFigures, MeanCharWidth, WordSeparationThreshold,
-        WhitespaceCover] =
+  auto [SortedChars, SortedFigures, MeanCharWidth, MeanCharHeight,
+        WordSeparationThreshold, WhitespaceCover] =
       std::move(this->preparePreliminaryData(Items, PageSize));
-  auto [Lines, Figures] = std::move(this->findPageLinesAndFigures(
-      SortedChars, SortedFigures, WhitespaceCover, PageSize));
+  auto [Lines, Figures] = std::move(
+      this->findPageLinesAndFigures(SortedChars, SortedFigures, WhitespaceCover,
+                                    MeanCharWidth, MeanCharHeight, PageSize));
   auto Blocks = this->findTextBlocks(stuBoundingBox(stuPoint(0, 0), PageSize),
                                      Lines, Figures, WhitespaceCover);
   return Blocks;
