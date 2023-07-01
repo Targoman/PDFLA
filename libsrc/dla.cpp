@@ -99,11 +99,11 @@ stuBoundingBox stuBoundingBox::intersectWith(
 
 bool stuBoundingBox::hasIntersectionWith(const stuBoundingBox &_other) const {
   auto ThresholdX =
-      std::min(std::min(this->width(), _other.width()) - 0.01f, MIN_ITEM_SIZE);
-  auto ThresholdY = std::min(std::min(this->height(), _other.height()) - 0.01f,
-                             MIN_ITEM_SIZE);
-  return this->horizontalOverlap(_other) > ThresholdX &&
-         this->verticalOverlap(_other) > ThresholdY;
+      std::min(std::min(this->width(), _other.width()), MIN_ITEM_SIZE);
+  auto ThresholdY =
+      std::min(std::min(this->height(), _other.height()), MIN_ITEM_SIZE);
+  return this->horizontalOverlap(_other) >= ThresholdX &&
+         this->verticalOverlap(_other) >= ThresholdY;
 }
 
 bool stuBoundingBox::hasIntersectionWith(const BoundingBoxPtr_t &_other) const {

@@ -138,12 +138,16 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
   auto calculateCandidateScore = [&](const BoundingBoxPtr_t &_candidate) {
     constexpr float WLT = 2.f;
     constexpr float WHT = 4.f;
-    if (_candidate->width() <= WLT * _minCoverLegSize)
+    const float WidthThresholdLow = std::min(WHT, WLT * _minCoverLegSize);
+    const float WidthThresholdHigh =
+        std::min(WLT * WHT, WHT * _minCoverLegSize);
+    if (_candidate->width() <= WidthThresholdLow)
       return _candidate->height() + _candidate->width();
-    else if (_candidate->width() > WHT * _minCoverLegSize)
+    else if (_candidate->width() > WidthThresholdHigh)
       return 2.f * _candidate->height();
     else {
-      float C = std::cos(M_PIf * (_candidate->width() - WLT) / (WHT - WLT));
+      float C = std::cos(M_PIf * (_candidate->width() - WidthThresholdLow) /
+                         (WidthThresholdHigh - WidthThresholdLow));
       return (2.f / (1 + C)) * (_candidate->height() + C * _candidate->width());
     }
   };
@@ -167,6 +171,12 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
       Candidates.erase(Candidates.begin() + ArgMax);
 
       if (Obstacles.empty() || Score < 1) {
+        // clsPdfLaDebug::instance()
+        //     .createImage(this)
+        //     .add(_bounds)
+        //     .add(Cover)
+        //     .add(_obstacles)
+        //     .show("Cover");
         return Cover;
       }
       auto Union = stuBoundingBox(_bounds->right(), _bounds->bottom(),
@@ -177,15 +187,31 @@ BoundingBoxPtrVector_t clsPdfLaInternals::getRawWhitespaceCover(
           minElement(Obstacles, [&Center](const BoundingBoxPtr_t &_obstacle) {
             return -_obstacle->area();
           });
-      for (auto &NewCandidate :
-           {std::make_shared<stuBoundingBox>(Pivot->right(), Cover->top(),
-                                             Cover->right(), Cover->bottom()),
-            std::make_shared<stuBoundingBox>(Cover->left(), Cover->top(),
-                                             Pivot->left(), Cover->bottom()),
-            std::make_shared<stuBoundingBox>(Cover->left(), Pivot->bottom(),
-                                             Cover->right(), Cover->bottom()),
-            std::make_shared<stuBoundingBox>(Cover->left(), Cover->top(),
-                                             Cover->right(), Pivot->top())}) {
+
+      BoundingBoxPtrVector_t NewCandidates{
+          std::make_shared<stuBoundingBox>(Pivot->right() + MIN_ITEM_SIZE,
+                                           Cover->top(), Cover->right(),
+                                           Cover->bottom()),
+          std::make_shared<stuBoundingBox>(Cover->left(), Cover->top(),
+                                           Pivot->left() - MIN_ITEM_SIZE,
+                                           Cover->bottom()),
+          std::make_shared<stuBoundingBox>(Cover->left(),
+                                           Pivot->bottom() + MIN_ITEM_SIZE,
+                                           Cover->right(), Cover->bottom()),
+          std::make_shared<stuBoundingBox>(Cover->left(), Cover->top(),
+                                           Cover->right(),
+                                           Pivot->top() - MIN_ITEM_SIZE)};
+
+      // clsPdfLaDebug::instance()
+      //     .createImage(this)
+      //     .add(_bounds)
+      //     .add(Cover)
+      //     .add(Obstacles)
+      //     .add(NewCandidates)
+      //     .add(Pivot)
+      //     .show("NewCandidates");
+
+      for (auto &NewCandidate : NewCandidates) {
         if (!candidateIsAcceptable(NewCandidate)) continue;
         Candidates.push_back(std::make_tuple(
             calculateCandidateScore(NewCandidate), NewCandidate,
