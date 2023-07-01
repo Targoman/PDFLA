@@ -895,8 +895,9 @@ DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
       this->PdfiumWrapper->getPageItems(_pageIndex), [](const DocItemPtr_t &e) {
         return true;
         return e->BoundingBox.width() * e->BoundingBox.height() >
-               MIN_ITEM_SIZE * MIN_ITEM_SIZE;
+               2.f * MIN_ITEM_SIZE * MIN_ITEM_SIZE;
       });
+
   auto [SortedChars, SortedFigures, MeanCharWidth, MeanCharHeight,
         WordSeparationThreshold, WhitespaceCover] =
       std::move(this->preparePreliminaryData(Items, PageSize));
