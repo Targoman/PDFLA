@@ -27,7 +27,6 @@ class clsPdfLa {
 
  public:
   Targoman::DLA::DocBlockPtrVector_t getPageBlocks(size_t _pageIndex);
-  Targoman::DLA::DocBlockPtrVector_t getTextBlocks(size_t _pageIndex);
 
  public:
   void enableDebugging(const std::string &_basename);
