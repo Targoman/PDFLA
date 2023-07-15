@@ -585,11 +585,6 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
         continue;
       // TODO: Deal with this magic constant
       if (OtherLine->BoundingBox.horizontalOverlap(Line->BoundingBox) > 1.f) {
-        if (Line->BoundingBox.bottom() > 760) {
-          std::cout << "CHECK THIS: " << OtherLine << std::endl;
-          std::cout << "HasBoundingBoxMember:" << HasNoLinesUnderneath
-                    << std::endl;
-        }
         HasNoLinesUnderneath = false;
       }
       float HorizontalOverlap =
@@ -612,9 +607,6 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
       }
     }
     TopNeighbours[BottomNeighbour] = Line;
-    if (Line->BoundingBox.bottom() > 760) {
-      std::cout << "HasNoLinesUnderneath:" << HasNoLinesUnderneath << std::endl;
-    }
     if (HasNoLinesUnderneath) {
       if (Line->BoundingBox.left() < _pageBounds.centerX() &&
           Line->BoundingBox.right() > _pageBounds.centerX())
@@ -799,6 +791,11 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
   for (auto &Item : Result) {
     if (Item.get() == nullptr) continue;
     if (Item->Type != enuDocBlockType::Text) continue;
+    // TODO: Handle the magic constant
+    if (Item->BoundingBox.area() < 4.f * MIN_ITEM_SIZE * MIN_ITEM_SIZE) {
+      Item.reset();
+      continue;
+    }
     for (auto &OtherItem : Result) {
       if (OtherItem.get() == nullptr) continue;
       if (Item.get() == OtherItem.get()) continue;
@@ -813,24 +810,35 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
 
   // Resolve overlap between blocks
   if (true) {
-    sort_(Result,
-          [](const clsDocBlockPtr &b) { return -b->BoundingBox.area(); });
-    auto Iterator = Result.begin();
-    while (Iterator != Result.end()) {
-      if (Iterator->get() == nullptr) {
-        ++Iterator;
+    sort_(Result, [](const clsDocBlockPtr &b) {
+      if (b.get() == nullptr) return 0.f;
+      return -b->BoundingBox.area();
+    });
+    size_t j = 0;
+    while (j < Result.size()) {
+      size_t i = j;
+      ++j;
+      if (Result[i].get() == nullptr ||
+          Result[i]->BoundingBox.area() < 10.f * MIN_ITEM_SIZE * MIN_ITEM_SIZE)
         continue;
-      }
-      auto OverlappingBlocks = filter(Result, [&](const clsDocBlockPtr &b) {
-        return b.get() != Iterator->get() && b.get() != nullptr &&
-               b->BoundingBox.hasIntersectionWith(Iterator->get()->BoundingBox);
-      });
+      auto OverlappingBlocks =
+          filterAsReferenceWrapper(Result, [&](const clsDocBlockPtr &b) {
+            if (b.get() == nullptr || b.get() == Result[i].get() ||
+                b->BoundingBox.area() < 10.f * MIN_ITEM_SIZE * MIN_ITEM_SIZE)
+              return false;
+            return b->BoundingBox.hasIntersectionWith(Result[i]->BoundingBox);
+          });
       if (OverlappingBlocks.empty()) continue;
+      clsPdfLaDebug::instance()
+          .createImage(this)
+          .add(OverlappingBlocks)
+          .add(Result[i])
+          .show("OVB");
       // Gather all lines in all these overlapping blocks
-      DocLinePtrVector_t AllLines = Iterator->asText()->Lines;
+      DocLinePtrVector_t AllLines = Result[i].asText()->Lines;
       for (auto &Block : OverlappingBlocks)
-        AllLines.insert(AllLines.end(), Block.asText()->Lines.begin(),
-                        Block.asText()->Lines.end());
+        AllLines.insert(AllLines.end(), Block.get().asText()->Lines.begin(),
+                        Block.get().asText()->Lines.end());
       sortByBoundingBoxes<enuBoundingBoxOrdering::T2BL2R>(AllLines);
       for (auto &Line : AllLines) {
         if (Line.get() == nullptr) continue;
@@ -843,54 +851,69 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
           }
         }
       }
-      // Scatter lines in new properly shaped blocks
-      std::vector<float> Y{Iterator->get()->BoundingBox.top(),
-                           Iterator->get()->BoundingBox.bottom()};
-      for (auto &Block : OverlappingBlocks)
-        Y.insert(Y.end(),
-                 {Block->BoundingBox.top(), Block->BoundingBox.bottom()});
-      auto X0 = std::min(Iterator->get()->BoundingBox.left(),
-                         min(OverlappingBlocks, [](const clsDocBlockPtr &b) {
-                           return b->BoundingBox.left();
-                         }));
-      auto X1 = std::max(Iterator->get()->BoundingBox.left(),
-                         max(OverlappingBlocks, [](const clsDocBlockPtr &b) {
-                           return b->BoundingBox.left();
-                         }));
-      std::sort(Y.begin(), Y.end());
-      DocBlockPtrVector_t NewBlocks(Y.size() - 1);
-      for (size_t i = 1; i < Y.size(); ++i) {
-        NewBlocks[i].reset(new stuDocTextBlock());
-        NewBlocks[i]->BoundingBox = stuBoundingBox(X0, Y[i - 1], X1, Y[i]);
+      // Merge any horizontally fully overlapped blocks into result
+      for (const auto &Block : OverlappingBlocks) {
+        if (Block.get() == nullptr) continue;
+        auto Overlap =
+            Block.get()->BoundingBox.horizontalOverlap(Result[i]->BoundingBox);
+        if (Overlap > 0.95f * Block.get()->BoundingBox.width() &&
+            Overlap > 0.95f * Result[i]->BoundingBox.width()) {
+          Result[i]->BoundingBox.unionWith_(Block.get()->BoundingBox);
+          Block.get().reset();
+        }
       }
-
+      // Scatter lines in new properly shaped blocks
+      std::vector<float> Y{Result[i]->BoundingBox.top(),
+                           Result[i]->BoundingBox.bottom()};
+      for (const auto &Block : OverlappingBlocks) {
+        if (Block.get() == nullptr) continue;
+        Y.insert(Y.end(), {Block.get()->BoundingBox.top(),
+                           Block.get()->BoundingBox.bottom()});
+      }
+      std::sort(Y.begin(), Y.end());
+      // Remove old blocks
+      Result[i].reset();
+      for (auto &Block : OverlappingBlocks) Block.get().reset();
+      // Create new blocks
+      DocBlockPtrVector_t NewBlocks;
+      for (size_t k = 1; k < Y.size(); ++k) {
+        clsDocBlockPtr NewBlock;
+        NewBlock.reset(new stuDocTextBlock());
+        NewBlock->BoundingBox =
+            stuBoundingBox(_pageBounds.right(), _pageBounds.bottom(),
+                           _pageBounds.left(), _pageBounds.top());
+        NewBlocks.push_back(NewBlock);
+      }
+      // Assign lines
       for (auto &Line : AllLines) {
         clsDocBlockPtr BestBlock;
         float BestOverlap = 0.f;
-        for (auto &Block : NewBlocks) {
-          float BlockOverlap =
-              Block->BoundingBox.verticalOverlap(Line->BoundingBox);
+        for (size_t k = 1; k < Y.size(); ++k) {
+          float BlockOverlap = std::min(Y[k], Line->BoundingBox.bottom()) -
+                               std::max(Y[k - 1], Line->BoundingBox.top());
           if (BlockOverlap > BestOverlap) {
-            BestBlock = Block;
+            BestBlock = NewBlocks[k - 1];
             BestOverlap = BlockOverlap;
           }
         }
+        if (BestBlock.asText()->Lines.empty())
+          BestBlock->BoundingBox = Line->BoundingBox;
+        else
+          BestBlock->BoundingBox.unionWith_(Line->BoundingBox);
         BestBlock.asText()->Lines.push_back(Line);
       }
+      // Add new blocks to results
+      clsPdfLaDebug::instance()
+          .createImage(this)
+          .add(filter(NewBlocks,
+                      [](const clsDocBlockPtr &b) {
+                        return !b.asText()->Lines.empty();
+                      }))
+          .show("OVB2");
 
-      for(auto& Block: NewBlocks)
-        if(Block.asText()->Lines.empty())
-          Block.reset();
-
-      Iterator->reset();
-      for (auto &Block : OverlappingBlocks) Block.reset();
-
-      ++Iterator;
-
-      for(auto& Block: NewBlocks) {
-        if(Block.get() == nullptr)
-          continue;
-        Result.push_back(Block);
+      for (auto &Block : NewBlocks) {
+        if (Block.asText()->Lines.empty()) continue;
+        Result.emplace_back(std::move(Block));
       }
     }
   }
@@ -926,6 +949,8 @@ std::vector<uint8_t> clsPdfLaInternals::renderPageImage(
 }
 
 DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
+  std::cout << "PageIndex:" << _pageIndex << std::endl;
+
   auto PageSize = this->getPageSize(_pageIndex);
 
   if (clsPdfLaDebug::instance().isObjectRegistered(this)) {

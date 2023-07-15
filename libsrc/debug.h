@@ -42,6 +42,14 @@ struct stuBoundingBoxPtrHelper<std::shared_ptr<T>, void> {
 };
 
 template <typename T>
+struct stuBoundingBoxPtrHelper<std::reference_wrapper<T>, void> {
+  static void appendTo(const std::reference_wrapper<T>& _item,
+                       std::vector<const Targoman::DLA::stuBoundingBox*>& v) {
+      stuBoundingBoxPtrHelper<RemoveConstRef_t<T>>::appendTo(_item.get(), v);
+  }
+};
+
+template <typename T>
 struct stuBoundingBoxPtrHelper<
     T,
     std::enable_if_t<

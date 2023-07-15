@@ -73,6 +73,19 @@ auto filter(const T0 &v, Functor_t f) {
 }
 
 template <typename T0, typename Functor_t>
+auto filterAsReferenceWrapper(T0 &v, Functor_t f) {
+  using ContainerTraits_t = stuContainerTypeTraits<T0>;
+  static_assert(ContainerTraits_t::IsContainer,
+                "`filter` only works on containers");
+  using T1 = typename ContainerTraits_t::ElementBareType_t;
+  std::vector<std::reference_wrapper<T1>> Result;
+  for(auto& i: v)
+    if(f(i))
+      Result.push_back(i);
+  return Result;
+}
+
+template <typename T0, typename Functor_t>
 void filter_(T0 &v, Functor_t f) {
   using ContainerTraits_t = stuContainerTypeTraits<T0>;
   static_assert(ContainerTraits_t::IsContainer,
