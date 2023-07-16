@@ -40,16 +40,17 @@ cv::Rect bbox2CvRect(const stuBoundingBox &_bbox) {
 }
 
 void processPdfFile(const std::string &_pdfFilePath, const std::string &_stem,
-                    const std::string &_debugOut, const std::vector<size_t> _pageIndexes, bool _enableDebugging = false) {
+                    const std::string &_debugOut,
+                    const std::vector<size_t> _pageIndexes,
+                    bool _enableDebugging = false) {
   auto PdfFileContent = readFileContents(_pdfFilePath.data());
   auto PdfLa =
       std::make_shared<clsPdfLa>(PdfFileContent.data(), PdfFileContent.size());
 
-  if(_enableDebugging)
-    PdfLa->enableDebugging(fs::path(_pdfFilePath).stem());
+  if (_enableDebugging) PdfLa->enableDebugging(fs::path(_pdfFilePath).stem());
 
   std::vector<size_t> PageIndexes = _pageIndexes;
-  if(PageIndexes.size() == 0) {
+  if (PageIndexes.size() == 0) {
     for (size_t PageIndex = 0; PageIndex < PdfLa->pageCount(); ++PageIndex)
       PageIndexes.push_back(PageIndex);
   }
@@ -62,25 +63,35 @@ void processPdfFile(const std::string &_pdfFilePath, const std::string &_stem,
 
     auto PageMatrixData = PdfLa->renderPageImage(PageIndex, 0xffffffff, Size);
     cv::Mat PageImage(Size.Height, Size.Width, CV_8UC3, PageMatrixData.data());
-    for (auto &Block : Blocks) {
-      auto Item = Block->BoundingBox;
-      cv::Rect R = bbox2CvRect(Item.scale(Scale));
-      
-      if(R.area() < 4)
-        continue;
+    auto markBoundingBox = [&](const stuBoundingBox &_boundingBox,
+                               const cv::Scalar &_fillColor) {
+      cv::Rect R = bbox2CvRect(_boundingBox.scale(Scale));
+      if (R.area() < 4) return;
 
+      auto ROI = PageImage(R);
+      auto RoiCopy = ROI.clone();
+
+      cv::rectangle(RoiCopy, cv::Rect(0, 0, R.width, R.height), _fillColor, -1);
+      cv::rectangle(RoiCopy, cv::Rect(0, 0, R.width, R.height),
+                    cv::Scalar(200, 200, 0), 3);
+      cv::addWeighted(ROI, 0.3, RoiCopy, 0.7, 0, ROI);
+    };
+
+    for (auto &Block : Blocks) {
       cv::Scalar FillColor;
       if (Block->Type == enuDocBlockType::Text)
         FillColor = cv::Scalar(100, 0, 0);
       else
         FillColor = cv::Scalar(0, 100, 0);
 
-      auto ROI = PageImage(R);
-      auto RoiCopy = ROI.clone();
+      markBoundingBox(Block->BoundingBox, FillColor);
 
-      cv::rectangle(RoiCopy, cv::Rect(0, 0, R.width, R.height), FillColor, -1);
-      cv::rectangle(RoiCopy, cv::Rect(0, 0, R.width, R.height), cv::Scalar(200, 200, 0), 3);
-      cv::addWeighted(ROI, 0.3, RoiCopy, 0.7, 0, ROI);
+      if (Block->Type == enuDocBlockType::Figure) {
+        cv::Scalar FillColor(0, 0, 100);
+        for (const auto &Block : Block.asFigure()->TextBlocks) {
+          markBoundingBox(Block->BoundingBox, FillColor);
+        }
+      }
     }
 
     std::ostringstream ss;
@@ -97,8 +108,8 @@ int main(void) {
   const std::string DebugOutputPath =
       "/data/Work/Targoman/InternalProjects/TarjomyarV2/PDFA/debug";
 
-  const std::vector<std::tuple<std::string, std::vector<size_t>>> ChosenPdfs {
-    {"bi-1097.pdf", { 5 } },
+  const std::vector<std::tuple<std::string, std::vector<size_t>>> ChosenPdfs{
+      {"bi-1097.pdf", {2}},
   };
   std::vector<std::tuple<fs::path, std::vector<size_t>>> PdfFilePaths;
   if (ChosenPdfs.size()) {
@@ -119,8 +130,9 @@ int main(void) {
 
   std::cout << "Searching `" << BasePath << "` ..." << std::endl;
   for (auto &[Path, Pages] : PdfFilePaths) {
-      std::cout << Path.native() << std::endl;
-      processPdfFile(Path, Path.stem(), DebugOutputPath, Pages, ChosenPdfs.size() > 0);
+    std::cout << Path.native() << std::endl;
+    processPdfFile(Path, Path.stem(), DebugOutputPath, Pages,
+                   ChosenPdfs.size() > 0);
   }
   return 0;
 }

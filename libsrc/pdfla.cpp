@@ -372,12 +372,16 @@ clsPdfLaInternals::findPageLinesAndFigures(
     if (Item->BoundingBox.area() <=
         MAX_IMAGE_BLOB_AREA_FACTOR * _pageSize.area()) {
       DocItemPtr_t SameFigure{nullptr};
-      for (auto &ResultFigureItem : ResultFigures)
-        if (ResultFigureItem->BoundingBox.hasIntersectionWith(
-                Item->BoundingBox)) {
+      for (auto &ResultFigureItem : ResultFigures) {
+        auto Intersection =
+            ResultFigureItem->BoundingBox.intersectWith(Item->BoundingBox);
+        // TODO: Handle these magic constants
+        if (Intersection.width() > -10.f * MIN_ITEM_SIZE &&
+            Intersection.height() > -10.f * MIN_ITEM_SIZE) {
           SameFigure = ResultFigureItem;
           break;
         }
+      }
       if (SameFigure.get() != nullptr)
         SameFigure->BoundingBox.unionWith_(Item->BoundingBox);
       else
@@ -626,6 +630,8 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
   DocBlockPtrVector_t Result;
   do {
     auto Line = getFirstUnusedLine();
+    if(Line.get() == nullptr)
+      break;
     if (UsedLines.find(Line) != UsedLines.end()) {
       std::cout << "THIS MUST NEVER HAPPEN" << std::endl;
     }
@@ -645,7 +651,8 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
     for (const auto &OtherLine :
          sortedByBoundingBoxes<enuBoundingBoxOrdering::L2R>(
              filter(SortedLines, [&Line](const DocLinePtr_t &_otherLine) {
-               return _otherLine->BoundingBox.verticalOverlap(
+               return _otherLine.get() != Line.get() &&
+                      _otherLine->BoundingBox.verticalOverlap(
                           Line->BoundingBox) > MIN_ITEM_SIZE;
              }))) {
       if (UsedLines.find(OtherLine) == UsedLines.end()) {
@@ -829,11 +836,7 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
             return b->BoundingBox.hasIntersectionWith(Result[i]->BoundingBox);
           });
       if (OverlappingBlocks.empty()) continue;
-      clsPdfLaDebug::instance()
-          .createImage(this)
-          .add(OverlappingBlocks)
-          .add(Result[i])
-          .show("OVB");
+
       // Gather all lines in all these overlapping blocks
       DocLinePtrVector_t AllLines = Result[i].asText()->Lines;
       for (auto &Block : OverlappingBlocks)
@@ -903,14 +906,6 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
         BestBlock.asText()->Lines.push_back(Line);
       }
       // Add new blocks to results
-      clsPdfLaDebug::instance()
-          .createImage(this)
-          .add(filter(NewBlocks,
-                      [](const clsDocBlockPtr &b) {
-                        return !b.asText()->Lines.empty();
-                      }))
-          .show("OVB2");
-
       for (auto &Block : NewBlocks) {
         if (Block.asText()->Lines.empty()) continue;
         Result.emplace_back(std::move(Block));
@@ -981,14 +976,32 @@ DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
   auto [Lines, Figures] = std::move(
       this->findPageLinesAndFigures(SortedChars, SortedFigures, WhitespaceCover,
                                     MeanCharWidth, MeanCharHeight, PageSize));
+
+  auto [FreeLines, LinesInFigures] =
+      split(Lines, [&, Figures = Figures](const DocLinePtr_t &l) {
+        return !any(Figures, [&](const DocItemPtr_t &f) {
+          return f->BoundingBox.contains(l->BoundingBox);
+        });
+      });
+
   auto Blocks =
-      this->findTextBlocks(stuBoundingBox(stuPoint(0.f, 0.f), PageSize), Lines,
-                           Figures, WhitespaceCover);
+      this->findTextBlocks(stuBoundingBox(stuPoint(0.f, 0.f), PageSize),
+                           FreeLines, Figures, WhitespaceCover);
 
   for (const auto Item : Figures) {
     clsDocBlockPtr FigureBlock;
     FigureBlock.reset(new stuDocFigureBlock);
     FigureBlock->BoundingBox = Item->BoundingBox;
+    auto FigureLines = filter(LinesInFigures, [&](const DocLinePtr_t &l) {
+      return Item->BoundingBox.contains(l->BoundingBox);
+    });
+    if (FigureLines.size() > 0) {
+      FigureBlock.asFigure()->TextBlocks = findTextBlocks(
+          Item->BoundingBox, FigureLines, DocItemPtrVector_t(),
+          filter(WhitespaceCover, [&](const BoundingBoxPtr_t &w) {
+            return w->hasIntersectionWith(Item->BoundingBox);
+          }));
+    }
     Blocks.push_back(FigureBlock);
   }
 

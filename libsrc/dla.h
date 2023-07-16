@@ -371,6 +371,7 @@ struct stuDocTextBlock : public stuDocBlock {
 
 struct stuDocFigureBlock : public stuDocBlock {
   clsDocBlockPtr Caption;
+  DocBlockPtrVector_t TextBlocks;
   stuDocFigureBlock() : stuDocBlock(enuDocBlockType::Figure) {}
 };
 
