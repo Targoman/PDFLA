@@ -148,6 +148,13 @@ struct stuBoundingBox {
     this->Size.scale_(_scale);
   }
 
+  bool isStronglyLeftOf(const stuBoundingBox &_other) const;
+  bool isStronglyLeftOf(const BoundingBoxPtr_t &_other) const;
+
+  bool isStronglyRightOf(const stuBoundingBox &_other) const;
+  bool isStronglyRightOf(const BoundingBoxPtr_t &_other) const;
+
+
   stuBoundingBox scale(float _scale) const {
     auto Copy = *this;
     Copy.scale_(_scale);
@@ -287,10 +294,10 @@ struct stuDocItem : public stuBoxBoundedItem {
   enuDocItemType Type;
   int32_t RepetitionPageOffset;
   float Baseline, Ascent, Descent, BaselineAngle;
-  wchar_t Char;
+  char32_t Char;
   stuDocItem(const stuBoundingBox &_boundingBox, enuDocItemType _type,
              float _baseline, float _ascent, float _descent,
-             float _baselineAngle, wchar_t _char)
+             float _baselineAngle, char32_t _char)
       : stuBoxBoundedItem(_boundingBox),
         Type(_type),
         Baseline(_baseline),
@@ -357,6 +364,8 @@ struct stuDocLine : public stuBoxBoundedItem {
 
   float overlap(const stuDocLine &_otherLine) const;
   float overlap(const DocLinePtr_t &_otherLine) const;
+
+  std::u32string contents() const;
 };
 
 enum class enuDocTextBlockAssociation { None, IsCaptionOf, IsInsideOf };

@@ -561,8 +561,6 @@ clsPdfLaInternals::findPageLinesAndFigures(
   filterNullPtrs_(ResultLines);
   filterNullPtrs_(ResultFigures);
 
-  // TODO: Make line elements sorted and text extractable
-
   return std::make_tuple(ResultLines, ResultFigures);
 }
 
@@ -577,7 +575,6 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
   std::map<DocLinePtr_t, DocLinePtr_t> BottomNeighbours;
   DocLinePtr_t PageNumberLine;
   for (auto &Line : SortedLines) {
-    Line->computeBaseline();
     auto &BottomNeighbour = BottomNeighbours[Line];
     float BottomNeighbourVerticalOverlap = std::numeric_limits<float>::min();
     float BottomNeighbourHorizontalOverlap = std::numeric_limits<float>::min();
@@ -630,8 +627,7 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
   DocBlockPtrVector_t Result;
   do {
     auto Line = getFirstUnusedLine();
-    if(Line.get() == nullptr)
-      break;
+    if (Line.get() == nullptr) break;
     if (UsedLines.find(Line) != UsedLines.end()) {
       std::cout << "THIS MUST NEVER HAPPEN" << std::endl;
     }
@@ -943,6 +939,17 @@ std::vector<uint8_t> clsPdfLaInternals::renderPageImage(
   return Data;
 }
 
+void finalizeLine(DocLinePtr_t &_line) {
+  _line->computeBaseline();
+  sort_(_line->Items, [] (const DocItemPtr_t& a, const DocItemPtr_t& b) {
+    if(a->BoundingBox.isStronglyLeftOf(b->BoundingBox))
+      return true;
+    if(a->BoundingBox.isStronglyRightOf(b->BoundingBox))
+      return false;
+    return a->BoundingBox.top() < b->BoundingBox.top();
+  });
+}
+
 DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
   std::cout << "PageIndex:" << _pageIndex << std::endl;
 
@@ -1003,6 +1010,29 @@ DocBlockPtrVector_t clsPdfLaInternals::getPageBlocks(size_t _pageIndex) {
           }));
     }
     Blocks.push_back(FigureBlock);
+  }
+
+  for (auto &Block : Blocks) {
+    switch (Block->Type) {
+      case enuDocBlockType::Text:
+        for (auto &Line : Block.asText()->Lines) finalizeLine(Line);
+        break;
+      case enuDocBlockType::Figure:
+        for (auto &Line : Block.asFigure()->Caption.asText()->Lines)
+          finalizeLine(Line);
+        for (auto &SubBlock : Block.asFigure()->TextBlocks)
+          for (auto &Line : SubBlock.asText()->Lines) finalizeLine(Line);
+        break;
+      case enuDocBlockType::Table:
+        for (auto &Line : Block.asTable()->Caption.asText()->Lines)
+          finalizeLine(Line);
+        for (auto &SubBlock : Block.asTable()->Cells)
+          for (auto &Line : SubBlock.Text.asText()->Lines) finalizeLine(Line);
+        break;
+      default:
+        // TODO: Log some warning
+        break;
+    }
   }
 
   return Blocks;

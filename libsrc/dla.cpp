@@ -211,6 +211,22 @@ bool stuBoundingBox::contains(const BoundingBoxPtr_t &_other) const {
   return this->contains(*_other);
 }
 
+bool stuBoundingBox::isStronglyLeftOf(const stuBoundingBox &_other) const {
+  return this->left() < _other.left() && this->right() < _other.right();
+}
+
+bool stuBoundingBox::isStronglyLeftOf(const BoundingBoxPtr_t &_other) const {
+  return this->isStronglyLeftOf(*_other);
+}
+
+bool stuBoundingBox::isStronglyRightOf(const stuBoundingBox &_other) const {
+  return this->left() > _other.left() && this->right() > _other.right();
+}
+
+bool stuBoundingBox::isStronglyRightOf(const BoundingBoxPtr_t &_other) const {
+  return this->isStronglyRightOf(*_other);
+}
+
 void stuDocLine::mergeWith_(const stuDocLine &_otherLine) {
   this->BoundingBox.unionWith_(_otherLine.BoundingBox);
   this->Items.insert(this->Items.end(), _otherLine.Items.begin(),
@@ -256,6 +272,34 @@ float stuDocLine::overlap(const stuDocLine &_otherLine) const {
 
 float stuDocLine::overlap(const DocLinePtr_t &_otherLine) const {
   return this->overlap(*_otherLine);
+}
+
+std::u32string stuDocLine::contents() const {
+  if (this->Items.empty()) return std::u32string();
+  std::u32string Result;
+  Result.reserve(this->Items.size() * 2);
+  size_t i = 0;
+  while (i < this->Items.size()) {
+    if (i < this->Items.size() - 1 &&
+        this->Items[i]->BoundingBox.isStronglyLeftOf(
+            this->Items[i + 1]->BoundingBox)) {
+      Result += U" __FORMULAE__ ";
+      ++i;
+      while (i < this->Items.size() - 1 &&
+             !this->Items[i]->BoundingBox.isStronglyLeftOf(
+                 this->Items[i + 1]->BoundingBox))
+        ++i;
+      if (i > 0 && i == this->Items.size() - 1 &&
+          !this->Items[i]->BoundingBox.isStronglyRightOf(
+              this->Items[i - 1]->BoundingBox))
+        ++i;
+    } else {
+      Result.push_back(this->Items[i]->Char);
+      ++i;
+    }
+  }
+  Result.shrink_to_fit();
+  return Result;
 }
 
 void stuDocTextBlock::mergeWith_(const stuDocTextBlock &_otherBlock) {

@@ -548,7 +548,7 @@ DocItemPtrVector_t clsPdfiumWrapper::getPageItems(size_t _pageIndex)
               enuDocItemType::Char, Baseline,
               std::min(Ascent, BoundingRect.bottom),
               std::max(Descent, BoundingRect.top), Angle,
-              static_cast<wchar_t>(Unicode.GetAt(j))));
+              static_cast<char32_t>(Unicode.GetAt(j))));
         }
       }
     }
