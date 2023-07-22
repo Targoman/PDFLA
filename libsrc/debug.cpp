@@ -1,23 +1,27 @@
 #include "debug.h"
 
+#ifndef EMSCRIPTEN
 #include <opencv4/opencv2/opencv.hpp>
 #include <sstream>
+#endif
 
 namespace Targoman {
 namespace PDFLA {
 using namespace Targoman::DLA;
 
 struct stuPdfLaDebugData {
+#ifndef EMSCRIPTEN
   std::map<size_t, RawImageData_t> PageImages;
   std::string ObjectBasename;
   size_t CurrentPageIndex;
+#endif
 };
 
 clsPdfLaDebug::clsPdfLaDebug() {}
 
 clsPdfLaDebug& clsPdfLaDebug::instance() {
   static std::unique_ptr<clsPdfLaDebug> Instance;
-  if (__glibc_unlikely(Instance.get() == nullptr))
+  if (__builtin_expect((Instance.get() == nullptr), 0))
     Instance.reset(new clsPdfLaDebug);
   return *Instance;
 }
@@ -25,31 +29,44 @@ clsPdfLaDebug& clsPdfLaDebug::instance() {
 template <>
 void clsPdfLaDebug::registerObject(const void* _object,
                                    const std::string& _basename) {
+#ifndef EMSCRIPTEN
   if (this->DebugData.find(_object) == this->DebugData.end())
     this->DebugData[_object] = stuPdfLaDebugData{
         std::map<size_t, std::tuple<std::vector<uint8_t>, stuSize>>(),
         _basename, 0};
+#endif
 }
 
 template <>
 void clsPdfLaDebug::unregisterObject(const void* _object) {
+#ifndef EMSCRIPTEN
   if (this->DebugData.find(_object) != this->DebugData.end())
     this->DebugData.erase(_object);
+#endif
 }
 
 template <>
 bool clsPdfLaDebug::isObjectRegistered(const void* _object) {
+#ifndef EMSCRIPTEN
   return this->DebugData.find(_object) != this->DebugData.end();
+#else
+  return false;
+#endif
 }
 
 template <>
 bool clsPdfLaDebug::pageImageExists(const void* _object, size_t _pageIndex) {
+#ifndef EMSCRIPTEN
   auto DebugDataIterator = this->DebugData.find(_object);
   if (DebugDataIterator == this->DebugData.end()) return false;
   auto& PageImages = DebugDataIterator->second.PageImages;
   return PageImages.find(_pageIndex) != PageImages.end();
+#else
+  return false;
+#endif
 }
 
+#ifndef EMSCRIPTEN
 cv::Mat bufferToMat(const std::vector<uint8_t>& _data, const stuSize& _size) {
   if (_data.size() == 0 || _size.area() < MIN_ITEM_SIZE) return cv::Mat();
   cv::Mat Result(_size.Height, _size.Width, CV_8UC3);
@@ -64,21 +81,25 @@ cv::Mat bufferToMat(const std::vector<uint8_t>& _data, const stuSize& _size) {
   }
   return Result;
 }
+#endif
 
 template <>
 void clsPdfLaDebug::registerPageImage(const void* _object, size_t _pageIndex,
                                       const std::vector<uint8_t>& _data,
                                       const stuSize& _size) {
+#ifndef EMSCRIPTEN
   auto DebugDataIterator = this->DebugData.find(_object);
   if (DebugDataIterator == this->DebugData.end()) return;
   DebugDataIterator->second.PageImages[_pageIndex] =
       std::make_tuple(_data, _size);
+#endif
 }
 
 template <>
 const RawImageData_t& clsPdfLaDebug::getPageImage(const void* _object,
                                                   size_t _pageIndex) {
   static RawImageData_t Empty;
+#ifndef EMSCRIPTEN
   using T = typename decltype(this->DebugData)::mapped_type;
   auto DebugDataIterator = this->DebugData.find(_object);
   if (DebugDataIterator == this->DebugData.end()) return Empty;
@@ -86,29 +107,41 @@ const RawImageData_t& clsPdfLaDebug::getPageImage(const void* _object,
   auto PageImageIterator = PageImages.find(_pageIndex);
   if (PageImageIterator == PageImages.end()) return Empty;
   return PageImageIterator->second;
+#else
+  return Empty;
+#endif
 }
 
 template <>
 void clsPdfLaDebug::setCurrentPageIndex(const void* _object,
                                         size_t _pageIndex) {
+#ifndef EMSCRIPTEN
   auto DebugDataIterator = this->DebugData.find(_object);
   if (DebugDataIterator == this->DebugData.end()) return;
   DebugDataIterator->second.CurrentPageIndex = _pageIndex;
+#endif
 }
 
+#ifndef EMSCRIPTEN
 cv::Rect bbox2CvRect(const stuBoundingBox& _bbox) {
   return cv::Rect(static_cast<int>(_bbox.left()), static_cast<int>(_bbox.top()),
                   static_cast<int>(_bbox.width()),
                   static_cast<int>(_bbox.height()));
 }
+#endif
 
 void clsPdfLaDebug::setDebugOutputPath(const std::string& _debugOutputPath) {
+#ifndef EMSCRIPTEN
   this->DebugOutputPath = _debugOutputPath;
+#endif
 }
 
+#ifndef EMSCRIPTEN
 static bool NoMorePdfLaDebugImages = false;
+#endif
 
 struct stuPdfLaDebugImageData {
+#ifndef EMSCRIPTEN
   cv::Mat PageImage;
   std::string DebugOutputPath;
   std::string Basename;
@@ -126,25 +159,31 @@ struct stuPdfLaDebugImageData {
         RoiBounds(static_cast<float>(PageImage.cols),
                   static_cast<float>(PageImage.rows), 0.f, 0.f),
         ColorIndex(0) {}
+#endif
 };
 
 clsPdfLaDebugImage::clsPdfLaDebugImage(const RawImageData_t& _imageData,
                                        const std::string& _debugOutputPath,
                                        const std::string& _basename,
                                        size_t _pageIndex) {
+#ifndef EMSCRIPTEN
   if (NoMorePdfLaDebugImages) return;
   this->Data.reset(new stuPdfLaDebugImageData(_imageData, _debugOutputPath,
                                               _basename, _pageIndex));
+#endif
 }
 
 clsPdfLaDebugImage::clsPdfLaDebugImage() {}
 
+#ifndef EMSCRIPTEN
 constexpr int COLORS[][3] = {
     {0, 80, 0}, {0, 0, 255}, {80, 20, 150}, {0, 180, 180}};
 constexpr size_t COLORS_SIZE = sizeof COLORS / sizeof COLORS[0];
+#endif
 
 clsPdfLaDebugImage& clsPdfLaDebugImage::add(
     const std::vector<const Targoman::DLA::stuBoundingBox*>& _boundingBoxes) {
+#ifndef EMSCRIPTEN
   if (_boundingBoxes.empty()) return *this;
   if (this->Data.get() == nullptr) return *this;
   size_t ColorIndex = this->Data->ColorIndex++;
@@ -171,10 +210,12 @@ clsPdfLaDebugImage& clsPdfLaDebugImage::add(
                 cv::Point(Rect.x, Rect.br().y), cv::FONT_HERSHEY_PLAIN, 3,
                 cv::Scalar(0), 3);
   }
+#endif
   return *this;
 }
 
 clsPdfLaDebugImage& clsPdfLaDebugImage::show(const std::string& _tag) {
+#ifndef EMSCRIPTEN
   if (this->Data.get() == nullptr) return *this;
   if (this->Data->PageImage.empty()) return *this;
 
@@ -202,11 +243,12 @@ clsPdfLaDebugImage& clsPdfLaDebugImage::show(const std::string& _tag) {
   cv::imshow(ss.str(), FinalImage);
   if (cv::waitKey(0) == 'Q') NoMorePdfLaDebugImages = true;
   cv::destroyWindow(ss.str());
-
+#endif
   return *this;
 }
 
 clsPdfLaDebugImage& clsPdfLaDebugImage::save(const std::string& _tag) {
+#ifndef EMSCRIPTEN
   if (this->Data.get() == nullptr) return *this;
   if (this->Data->PageImage.empty()) return *this;
 
@@ -214,12 +256,13 @@ clsPdfLaDebugImage& clsPdfLaDebugImage::save(const std::string& _tag) {
   ss << this->Data->DebugOutputPath << "/" << this->Data->Basename << "_p"
      << std::setw(3) << this->Data->PageIndex << "_" << _tag << ".png";
   cv::imwrite(ss.str(), this->Data->PageImage);
-
+#endif
   return *this;
 }
 
 template <>
 clsPdfLaDebugImage clsPdfLaDebug::createImage(const void* _object) {
+#ifndef EMSCRIPTEN
   if (NoMorePdfLaDebugImages) return clsPdfLaDebugImage();
   auto DebugDataIterator = this->DebugData.find(_object);
   if (DebugDataIterator == this->DebugData.end()) return clsPdfLaDebugImage();
@@ -231,6 +274,9 @@ clsPdfLaDebugImage clsPdfLaDebug::createImage(const void* _object) {
   return clsPdfLaDebugImage(
       PageImageDataIterator->second, this->DebugOutputPath,
       DebugDataIterator->second.ObjectBasename, PageIndex);
+#else
+  return clsPdfLaDebugImage();
+#endif
 }
 
 }  // namespace PDFLA

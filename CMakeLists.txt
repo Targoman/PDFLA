@@ -13,7 +13,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_subdirectory(3rdParty)
 
 # OpenCV
-find_package(OpenCV REQUIRED)
+if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Emscripten")
+    find_package(OpenCV REQUIRED)
+endif()
 
 # Main library
 tg_add_library(pdfla
@@ -42,6 +44,7 @@ target_include_directories(pdfla
 )
 
 # Tests
+if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Emscripten")
 add_executable(test_PDFLA
     tests/blackboxTest.cpp
 )
@@ -61,6 +64,7 @@ target_link_libraries(test_PDFLA
     fxcrt
     fxge    
 )
+endif()
 
 # Finalize the settings
 tg_process_all_targets()

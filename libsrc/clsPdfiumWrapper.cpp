@@ -156,7 +156,7 @@ std::shared_ptr<clsPdfFont> clsPdfiumWrapper::getFont(CPDF_Font *_rawPdfFont) {
 }
 
 clsPdfiumWrapper::clsPdfiumWrapper(uint8_t *_data, size_t _size) {
-  if (!__glibc_likely(__pdfiumModulesInitialized)) {
+  if (!__builtin_expect(__pdfiumModulesInitialized, 1)) {
     initializePdfiumModules();
     __pdfiumModulesInitialized = true;
   }

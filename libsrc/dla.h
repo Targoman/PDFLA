@@ -1,6 +1,8 @@
 #ifndef __TARGOMAN_DLA__
 #define __TARGOMAN_DLA__
 
+#define _USE_MATH_DEFINES
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -9,6 +11,10 @@
 #include <vector>
 
 #include "type_traits.hpp"
+
+#ifndef M_PIf
+#define M_PIf 3.14159265358979323846f
+#endif
 
 namespace Targoman {
 namespace DLA {
@@ -238,7 +244,7 @@ struct stuBoundingBoxComparator<
 template <typename T, enuBoundingBoxOrdering O>
 struct stuBoundingBoxComparator<
     T, O,
-    typename Targoman::Common::stuContainerTypeTraits<T>::stuOnlyForNonPointers<
+    typename Targoman::Common::stuContainerTypeTraits<T>::template stuOnlyForNonPointers<
         stuBoxBoundedItem>::type> {
   using U = typename Targoman::Common::stuContainerTypeTraits<T>::ElementType_t;
   bool operator()(const U &a, const U &b) {
@@ -249,7 +255,7 @@ struct stuBoundingBoxComparator<
 template <typename T, enuBoundingBoxOrdering O>
 struct stuBoundingBoxComparator<
     T, O,
-    typename Targoman::Common::stuContainerTypeTraits<T>::OnlyForNonPointers_t<
+    typename Targoman::Common::stuContainerTypeTraits<T>::template OnlyForNonPointers_t<
         stuBoundingBox>> {
   using U = typename Targoman::Common::stuContainerTypeTraits<T>::ElementType_t;
   bool operator()(const U &a, const U &b) {
