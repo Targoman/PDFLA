@@ -17,7 +17,7 @@ class clsPdfLa {
   clsPdfLa(uint8_t *_data, size_t _size);
   ~clsPdfLa();
 
-  size_t pageCount();
+  size_t pageCount() const;
 
  public:
   Targoman::DLA::stuSize getPageSize(size_t _pageIndex);

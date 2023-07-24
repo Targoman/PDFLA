@@ -66,5 +66,38 @@ target_link_libraries(test_PDFLA
 )
 endif()
 
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Emscripten")
+add_executable(PDFLAJS
+    wasm/interface.cpp
+)
+target_link_libraries(PDFLAJS
+    pdfla
+    fpdfapi
+    fdrm
+    fpdfdoc
+    fpdftext
+    fxcodec
+    fxcrt
+    fxge    
+)
+target_compile_options(PDFLAJS
+    PUBLIC
+    -flto
+    -fno-exceptions
+)
+target_link_options(PDFLAJS
+    PUBLIC
+    -Oz
+    -sINVOKE_RUN=0
+    -sASSERTIONS=1
+    -sELIMINATE_DUPLICATE_FUNCTIONS=1
+    -sFILESYSTEM=0
+    -sMODULARIZE=1
+    -flto
+    --bind
+    --no-entry
+)
+endif()
+
 # Finalize the settings
 tg_process_all_targets()

@@ -46,7 +46,7 @@ class clsPdfLaInternals {
   clsPdfLaInternals(uint8_t *_data, size_t _size)
       : PdfiumWrapper(new clsPdfiumWrapper(_data, _size)) {}
 
-  size_t pageCount();
+  size_t pageCount() const;
 
  public:
   stuSize getPageSize(size_t _pageIndex);
@@ -63,7 +63,7 @@ clsPdfLa::clsPdfLa(uint8_t *_data, size_t _size)
 
 clsPdfLa::~clsPdfLa() { clsPdfLaDebug::instance().unregisterObject(this); }
 
-size_t clsPdfLa::pageCount() { return this->Internals->pageCount(); }
+size_t clsPdfLa::pageCount() const { return this->Internals->pageCount(); }
 
 Targoman::DLA::stuSize clsPdfLa::getPageSize(size_t _pageIndex) {
   return this->Internals->getPageSize(_pageIndex);
@@ -914,7 +914,7 @@ DocBlockPtrVector_t clsPdfLaInternals::findTextBlocks(
   return Result;
 }
 
-size_t clsPdfLaInternals::pageCount() {
+size_t clsPdfLaInternals::pageCount() const {
   return this->PdfiumWrapper->pageCount();
 }
 
